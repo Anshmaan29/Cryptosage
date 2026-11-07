@@ -1,0 +1,560 @@
+[
+  {
+    "scenario": "downgrade",
+    "name": "Algorithm downgrade",
+    "objective": "Force an unapproved cryptographic choice.",
+    "mutation": "The untrusted relay changes the selected KEM in a signed response.",
+    "attempted": true,
+    "blocked": true,
+    "status": "blocked",
+    "reason": "Invalid negotiation signature",
+    "security_reason": "Invalid negotiation signature",
+    "protocol_response": "Invalid negotiation signature",
+    "elapsed_ms": 56.391723,
+    "timeline": [
+      {
+        "time": "2026-11-07T21:53:29.198242+00:00",
+        "elapsed_ms": 0.012045,
+        "phase": "launched",
+        "detail": "An isolated experiment was requested; active conversations are not a target."
+      },
+      {
+        "time": "2026-11-07T21:53:29.254254+00:00",
+        "elapsed_ms": 56.022865,
+        "phase": "packet_mutated",
+        "detail": "The untrusted relay changes the selected KEM in a signed response."
+      },
+      {
+        "time": "2026-11-07T21:53:29.254262+00:00",
+        "elapsed_ms": 56.025824,
+        "phase": "packet_received",
+        "detail": "The modified or replayed packet is submitted to the real isolated client protocol validator."
+      },
+      {
+        "time": "2026-11-07T21:53:29.254402+00:00",
+        "elapsed_ms": 56.166878,
+        "phase": "validation_failed",
+        "detail": "Invalid negotiation signature"
+      },
+      {
+        "time": "2026-11-07T21:53:29.254405+00:00",
+        "elapsed_ms": 56.16888,
+        "phase": "protected",
+        "detail": "The expected security boundary rejected this packet."
+      }
+    ],
+    "scope": "isolated real client/protocol experiment; active conversation unchanged"
+  },
+  {
+    "scenario": "modified_offers",
+    "name": "Modified capability list",
+    "objective": "Remove the recommended algorithm from the signed capability offer.",
+    "mutation": "The relay replaces the offered algorithm list without a trusted signature.",
+    "attempted": true,
+    "blocked": true,
+    "status": "blocked",
+    "reason": "Invalid negotiation signature",
+    "security_reason": "Invalid negotiation signature",
+    "protocol_response": "Invalid negotiation signature",
+    "elapsed_ms": 15.133069,
+    "timeline": [
+      {
+        "time": "2026-11-07T21:53:29.254643+00:00",
+        "elapsed_ms": 0.003125,
+        "phase": "launched",
+        "detail": "An isolated experiment was requested; active conversations are not a target."
+      },
+      {
+        "time": "2026-11-07T21:53:29.269243+00:00",
+        "elapsed_ms": 14.607358,
+        "phase": "packet_mutated",
+        "detail": "The relay replaces the offered algorithm list without a trusted signature."
+      },
+      {
+        "time": "2026-11-07T21:53:29.269251+00:00",
+        "elapsed_ms": 14.610261,
+        "phase": "packet_received",
+        "detail": "The modified or replayed packet is submitted to the real isolated client protocol validator."
+      },
+      {
+        "time": "2026-11-07T21:53:29.269438+00:00",
+        "elapsed_ms": 14.797664,
+        "phase": "validation_failed",
+        "detail": "Invalid negotiation signature"
+      },
+      {
+        "time": "2026-11-07T21:53:29.269441+00:00",
+        "elapsed_ms": 14.799373,
+        "phase": "protected",
+        "detail": "The expected security boundary rejected this packet."
+      }
+    ],
+    "scope": "isolated real client/protocol experiment; active conversation unchanged"
+  },
+  {
+    "scenario": "modified_selected",
+    "name": "Modified selected algorithm",
+    "objective": "Make the two clients accept different negotiation outcomes.",
+    "mutation": "The relay changes the selected identifier after the responder signs it.",
+    "attempted": true,
+    "blocked": true,
+    "status": "blocked",
+    "reason": "Invalid negotiation signature",
+    "security_reason": "Invalid negotiation signature",
+    "protocol_response": "Invalid negotiation signature",
+    "elapsed_ms": 15.795582,
+    "timeline": [
+      {
+        "time": "2026-11-07T21:53:29.269789+00:00",
+        "elapsed_ms": 0.006054,
+        "phase": "launched",
+        "detail": "An isolated experiment was requested; active conversations are not a target."
+      },
+      {
+        "time": "2026-11-07T21:53:29.285097+00:00",
+        "elapsed_ms": 15.315433,
+        "phase": "packet_mutated",
+        "detail": "The relay changes the selected identifier after the responder signs it."
+      },
+      {
+        "time": "2026-11-07T21:53:29.285105+00:00",
+        "elapsed_ms": 15.318233,
+        "phase": "packet_received",
+        "detail": "The modified or replayed packet is submitted to the real isolated client protocol validator."
+      },
+      {
+        "time": "2026-11-07T21:53:29.285262+00:00",
+        "elapsed_ms": 15.476625,
+        "phase": "validation_failed",
+        "detail": "Invalid negotiation signature"
+      },
+      {
+        "time": "2026-11-07T21:53:29.285265+00:00",
+        "elapsed_ms": 15.4783,
+        "phase": "protected",
+        "detail": "The expected security boundary rejected this packet."
+      }
+    ],
+    "scope": "isolated real client/protocol experiment; active conversation unchanged"
+  },
+  {
+    "scenario": "identity",
+    "name": "Identity substitution",
+    "objective": "Impersonate a contact using an attacker-owned ML-DSA key.",
+    "mutation": "A valid signature under a different real identity key replaces the pinned contact key.",
+    "attempted": true,
+    "blocked": true,
+    "status": "blocked",
+    "reason": "Peer identity changed: pinned fingerprint mismatch",
+    "security_reason": "Peer identity changed: pinned fingerprint mismatch",
+    "protocol_response": "Peer identity changed: pinned fingerprint mismatch",
+    "elapsed_ms": 15.188715,
+    "timeline": [
+      {
+        "time": "2026-11-07T21:53:29.285600+00:00",
+        "elapsed_ms": 0.005299,
+        "phase": "launched",
+        "detail": "An isolated experiment was requested; active conversations are not a target."
+      },
+      {
+        "time": "2026-11-07T21:53:29.300516+00:00",
+        "elapsed_ms": 14.923306,
+        "phase": "packet_mutated",
+        "detail": "A valid signature under a different real identity key replaces the pinned contact key."
+      },
+      {
+        "time": "2026-11-07T21:53:29.300524+00:00",
+        "elapsed_ms": 14.926157,
+        "phase": "packet_received",
+        "detail": "The modified or replayed packet is submitted to the real isolated client protocol validator."
+      },
+      {
+        "time": "2026-11-07T21:53:29.300584+00:00",
+        "elapsed_ms": 14.986384,
+        "phase": "validation_failed",
+        "detail": "Peer identity changed: pinned fingerprint mismatch"
+      },
+      {
+        "time": "2026-11-07T21:53:29.300586+00:00",
+        "elapsed_ms": 14.987855,
+        "phase": "protected",
+        "detail": "The expected security boundary rejected this packet."
+      }
+    ],
+    "scope": "isolated real client/protocol experiment; active conversation unchanged"
+  },
+  {
+    "scenario": "invalid_signature",
+    "name": "Invalid digital signature",
+    "objective": "Make a modified signature pass authentication.",
+    "mutation": "The relay flips a byte in a real ML-DSA signature.",
+    "attempted": true,
+    "blocked": true,
+    "status": "blocked",
+    "reason": "Invalid negotiation signature",
+    "security_reason": "Invalid negotiation signature",
+    "protocol_response": "Invalid negotiation signature",
+    "elapsed_ms": 13.145384,
+    "timeline": [
+      {
+        "time": "2026-11-07T21:53:29.300798+00:00",
+        "elapsed_ms": 0.002595,
+        "phase": "launched",
+        "detail": "An isolated experiment was requested; active conversations are not a target."
+      },
+      {
+        "time": "2026-11-07T21:53:29.313586+00:00",
+        "elapsed_ms": 12.794582,
+        "phase": "packet_mutated",
+        "detail": "The relay flips a byte in a real ML-DSA signature."
+      },
+      {
+        "time": "2026-11-07T21:53:29.313594+00:00",
+        "elapsed_ms": 12.79742,
+        "phase": "packet_received",
+        "detail": "The modified or replayed packet is submitted to the real isolated client protocol validator."
+      },
+      {
+        "time": "2026-11-07T21:53:29.313742+00:00",
+        "elapsed_ms": 12.946212,
+        "phase": "validation_failed",
+        "detail": "Invalid negotiation signature"
+      },
+      {
+        "time": "2026-11-07T21:53:29.313744+00:00",
+        "elapsed_ms": 12.947836,
+        "phase": "protected",
+        "detail": "The expected security boundary rejected this packet."
+      }
+    ],
+    "scope": "isolated real client/protocol experiment; active conversation unchanged"
+  },
+  {
+    "scenario": "tamper",
+    "name": "Ciphertext tampering",
+    "objective": "Display modified message plaintext.",
+    "mutation": "The relay flips one ciphertext byte before authenticated decryption.",
+    "attempted": true,
+    "blocked": true,
+    "status": "blocked",
+    "reason": "Ciphertext integrity verification failed",
+    "security_reason": "Ciphertext integrity verification failed",
+    "protocol_response": "Ciphertext integrity verification failed",
+    "elapsed_ms": 13.566489,
+    "timeline": [
+      {
+        "time": "2026-11-07T21:53:29.313954+00:00",
+        "elapsed_ms": 0.002658,
+        "phase": "launched",
+        "detail": "An isolated experiment was requested; active conversations are not a target."
+      },
+      {
+        "time": "2026-11-07T21:53:29.327002+00:00",
+        "elapsed_ms": 13.054664,
+        "phase": "packet_mutated",
+        "detail": "The relay flips one ciphertext byte before authenticated decryption."
+      },
+      {
+        "time": "2026-11-07T21:53:29.327009+00:00",
+        "elapsed_ms": 13.282196,
+        "phase": "packet_received",
+        "detail": "The modified or replayed packet is submitted to the real isolated client protocol validator."
+      },
+      {
+        "time": "2026-11-07T21:53:29.327307+00:00",
+        "elapsed_ms": 13.35698,
+        "phase": "validation_failed",
+        "detail": "Ciphertext integrity verification failed"
+      },
+      {
+        "time": "2026-11-07T21:53:29.327311+00:00",
+        "elapsed_ms": 13.358865,
+        "phase": "protected",
+        "detail": "The expected security boundary rejected this packet."
+      }
+    ],
+    "scope": "isolated real client/protocol experiment; active conversation unchanged"
+  },
+  {
+    "scenario": "replay",
+    "name": "Message replay",
+    "objective": "Display the same encrypted message more than once.",
+    "mutation": "An already consumed encrypted packet is submitted again.",
+    "attempted": true,
+    "blocked": true,
+    "status": "blocked",
+    "reason": "Replay rejected: message counter already consumed",
+    "security_reason": "Replay rejected: message counter already consumed",
+    "protocol_response": "Replay rejected: message counter already consumed",
+    "elapsed_ms": 15.156499,
+    "timeline": [
+      {
+        "time": "2026-11-07T21:53:29.327536+00:00",
+        "elapsed_ms": 0.003317,
+        "phase": "launched",
+        "detail": "An isolated experiment was requested; active conversations are not a target."
+      },
+      {
+        "time": "2026-11-07T21:53:29.342478+00:00",
+        "elapsed_ms": 14.948898,
+        "phase": "packet_mutated",
+        "detail": "An already consumed encrypted packet is submitted again."
+      },
+      {
+        "time": "2026-11-07T21:53:29.342485+00:00",
+        "elapsed_ms": 14.950959,
+        "phase": "packet_received",
+        "detail": "The modified or replayed packet is submitted to the real isolated client protocol validator."
+      },
+      {
+        "time": "2026-11-07T21:53:29.342493+00:00",
+        "elapsed_ms": 14.958644,
+        "phase": "validation_failed",
+        "detail": "Replay rejected: message counter already consumed"
+      },
+      {
+        "time": "2026-11-07T21:53:29.342494+00:00",
+        "elapsed_ms": 14.960344,
+        "phase": "protected",
+        "detail": "The expected security boundary rejected this packet."
+      }
+    ],
+    "scope": "isolated real client/protocol experiment; active conversation unchanged"
+  },
+  {
+    "scenario": "handshake_replay",
+    "name": "Handshake replay",
+    "objective": "Reuse a previously received signed session offer.",
+    "mutation": "The same signed offer and session identifier reach the receiver twice.",
+    "attempted": true,
+    "blocked": true,
+    "status": "blocked",
+    "reason": "Replay rejected: session identifier already seen",
+    "security_reason": "Replay rejected: session identifier already seen",
+    "protocol_response": "Replay rejected: session identifier already seen",
+    "elapsed_ms": 15.022062,
+    "timeline": [
+      {
+        "time": "2026-11-07T21:53:29.342705+00:00",
+        "elapsed_ms": 0.002767,
+        "phase": "launched",
+        "detail": "An isolated experiment was requested; active conversations are not a target."
+      },
+      {
+        "time": "2026-11-07T21:53:29.357378+00:00",
+        "elapsed_ms": 14.679678,
+        "phase": "packet_mutated",
+        "detail": "The same signed offer and session identifier reach the receiver twice."
+      },
+      {
+        "time": "2026-11-07T21:53:29.357386+00:00",
+        "elapsed_ms": 14.682349,
+        "phase": "packet_received",
+        "detail": "The modified or replayed packet is submitted to the real isolated client protocol validator."
+      },
+      {
+        "time": "2026-11-07T21:53:29.357529+00:00",
+        "elapsed_ms": 14.825687,
+        "phase": "validation_failed",
+        "detail": "Replay rejected: session identifier already seen"
+      },
+      {
+        "time": "2026-11-07T21:53:29.357531+00:00",
+        "elapsed_ms": 14.82769,
+        "phase": "protected",
+        "detail": "The expected security boundary rejected this packet."
+      }
+    ],
+    "scope": "isolated real client/protocol experiment; active conversation unchanged"
+  },
+  {
+    "scenario": "unsupported",
+    "name": "Unsupported algorithm injection",
+    "objective": "Negotiate a KEM outside the implementation whitelist.",
+    "mutation": "An isolated trusted test endpoint signs an unsupported capability to exercise policy validation; a relay cannot re-sign it.",
+    "attempted": true,
+    "blocked": true,
+    "status": "blocked",
+    "reason": "Malformed or unsupported algorithm offer",
+    "security_reason": "Malformed or unsupported algorithm offer",
+    "protocol_response": "Malformed or unsupported algorithm offer",
+    "elapsed_ms": 12.550111,
+    "timeline": [
+      {
+        "time": "2026-11-07T21:53:29.357739+00:00",
+        "elapsed_ms": 0.002988,
+        "phase": "launched",
+        "detail": "An isolated experiment was requested; active conversations are not a target."
+      },
+      {
+        "time": "2026-11-07T21:53:29.369842+00:00",
+        "elapsed_ms": 12.10949,
+        "phase": "packet_mutated",
+        "detail": "An isolated trusted test endpoint signs an unsupported capability to exercise policy validation; a relay cannot re-sign it."
+      },
+      {
+        "time": "2026-11-07T21:53:29.369849+00:00",
+        "elapsed_ms": 12.112454,
+        "phase": "packet_received",
+        "detail": "The modified or replayed packet is submitted to the real isolated client protocol validator."
+      },
+      {
+        "time": "2026-11-07T21:53:29.370044+00:00",
+        "elapsed_ms": 12.307933,
+        "phase": "validation_failed",
+        "detail": "Malformed or unsupported algorithm offer"
+      },
+      {
+        "time": "2026-11-07T21:53:29.370047+00:00",
+        "elapsed_ms": 12.309868,
+        "phase": "protected",
+        "detail": "The expected security boundary rejected this packet."
+      }
+    ],
+    "scope": "isolated real client/protocol experiment; active conversation unchanged"
+  },
+  {
+    "scenario": "invalid",
+    "name": "Corrupted cryptographic input",
+    "objective": "Pass a truncated public key into the cryptographic operation.",
+    "mutation": "An isolated trusted test endpoint signs a malformed KEM public key to reach size validation.",
+    "attempted": true,
+    "blocked": true,
+    "status": "blocked",
+    "reason": "invalid KEM public key length (expected 1184 bytes)",
+    "security_reason": "invalid KEM public key length (expected 1184 bytes)",
+    "protocol_response": "invalid KEM public key length (expected 1184 bytes)",
+    "elapsed_ms": 15.082365,
+    "timeline": [
+      {
+        "time": "2026-11-07T21:53:29.370300+00:00",
+        "elapsed_ms": 0.003919,
+        "phase": "launched",
+        "detail": "An isolated experiment was requested; active conversations are not a target."
+      },
+      {
+        "time": "2026-11-07T21:53:29.384754+00:00",
+        "elapsed_ms": 14.460668,
+        "phase": "packet_mutated",
+        "detail": "An isolated trusted test endpoint signs a malformed KEM public key to reach size validation."
+      },
+      {
+        "time": "2026-11-07T21:53:29.384761+00:00",
+        "elapsed_ms": 14.463394,
+        "phase": "packet_received",
+        "detail": "The modified or replayed packet is submitted to the real isolated client protocol validator."
+      },
+      {
+        "time": "2026-11-07T21:53:29.385079+00:00",
+        "elapsed_ms": 14.783642,
+        "phase": "validation_failed",
+        "detail": "invalid KEM public key length (expected 1184 bytes)"
+      },
+      {
+        "time": "2026-11-07T21:53:29.385084+00:00",
+        "elapsed_ms": 14.786049,
+        "phase": "protected",
+        "detail": "The expected security boundary rejected this packet."
+      }
+    ],
+    "scope": "isolated real client/protocol experiment; active conversation unchanged"
+  },
+  {
+    "scenario": "reorder",
+    "name": "Reordered messages",
+    "objective": "Advance the receiver chain out of sequence.",
+    "mutation": "Counter one arrives before counter zero; missing-message recovery is not claimed.",
+    "attempted": true,
+    "blocked": true,
+    "status": "blocked",
+    "reason": "Out-of-order message rejected; reconnect to recover a lost message",
+    "security_reason": "Out-of-order message rejected; reconnect to recover a lost message",
+    "protocol_response": "Out-of-order message rejected; reconnect to recover a lost message",
+    "elapsed_ms": 15.774963,
+    "timeline": [
+      {
+        "time": "2026-11-07T21:53:29.385396+00:00",
+        "elapsed_ms": 0.005518,
+        "phase": "launched",
+        "detail": "An isolated experiment was requested; active conversations are not a target."
+      },
+      {
+        "time": "2026-11-07T21:53:29.400895+00:00",
+        "elapsed_ms": 15.510018,
+        "phase": "packet_mutated",
+        "detail": "Counter one arrives before counter zero; missing-message recovery is not claimed."
+      },
+      {
+        "time": "2026-11-07T21:53:29.400907+00:00",
+        "elapsed_ms": 15.514114,
+        "phase": "packet_received",
+        "detail": "The modified or replayed packet is submitted to the real isolated client protocol validator."
+      },
+      {
+        "time": "2026-11-07T21:53:29.400919+00:00",
+        "elapsed_ms": 15.524864,
+        "phase": "validation_failed",
+        "detail": "Out-of-order message rejected; reconnect to recover a lost message"
+      },
+      {
+        "time": "2026-11-07T21:53:29.400921+00:00",
+        "elapsed_ms": 15.526352,
+        "phase": "protected",
+        "detail": "The expected security boundary rejected this packet."
+      }
+    ],
+    "scope": "isolated real client/protocol experiment; active conversation unchanged"
+  },
+  {
+    "scenario": "rekey_interruption",
+    "name": "Connection interrupted during re-key",
+    "objective": "Keep using a half-established replacement session.",
+    "mutation": "An isolated loopback relay drops the replacement handshake finish and closes both sockets.",
+    "attempted": true,
+    "blocked": true,
+    "status": "blocked",
+    "reason": "Connection interrupted during re-key; both clients discarded incomplete state and refused stale-session sending",
+    "security_reason": "Connection interrupted during re-key; both clients discarded incomplete state and refused stale-session sending",
+    "protocol_response": "Connection interrupted during re-key; both clients discarded incomplete state and refused stale-session sending",
+    "elapsed_ms": 76.076234,
+    "timeline": [
+      {
+        "time": "2026-11-07T21:53:29.401187+00:00",
+        "elapsed_ms": 0.004263,
+        "phase": "launched",
+        "detail": "An isolated experiment was requested; active conversations are not a target."
+      },
+      {
+        "time": "2026-11-07T21:53:29.458235+00:00",
+        "elapsed_ms": 57.055825,
+        "phase": "baseline",
+        "detail": "Two isolated real Python clients completed a baseline authenticated session over loopback WebSockets."
+      },
+      {
+        "time": "2026-11-07T21:53:29.458244+00:00",
+        "elapsed_ms": 57.059268,
+        "phase": "packet_mutated",
+        "detail": "The private lab relay is armed to interrupt the next replacement-handshake finish."
+      },
+      {
+        "time": "2026-11-07T21:53:29.465858+00:00",
+        "elapsed_ms": 64.678999,
+        "phase": "packet_received",
+        "detail": "The loopback relay received and withheld the replacement-handshake finish."
+      },
+      {
+        "time": "2026-11-07T21:53:29.476630+00:00",
+        "elapsed_ms": 75.454136,
+        "phase": "validation_failed",
+        "detail": "Both actual clients observed the connection loss and discarded incomplete replacement state."
+      },
+      {
+        "time": "2026-11-07T21:53:29.477254+00:00",
+        "elapsed_ms": 76.073883,
+        "phase": "protected",
+        "detail": "No incomplete replacement session or old session remained usable after disconnect."
+      }
+    ],
+    "scope": "isolated real local WebSocket clients"
+  }
+]

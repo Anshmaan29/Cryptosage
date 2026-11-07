@@ -19,9 +19,9 @@ An attacker may control the relay and network traffic, introduce its own identit
 
 ## Storage and endpoint exposure
 
-Identity secrets persist in a mode-0600 JSON file. The local data directory is private, and writes use atomic replacement. The file is not password encrypted. Anyone who compromises the account, machine, backup, or storage can obtain it. The demonstration's public-contact directory contains public keys only and does not authorize trust automatically.
+Identity secrets and conversation history are stored in AES-GCM envelopes. The default random local master key is stored in a mode-0600 file inside a private directory: copying the whole directory or compromising the account exposes it. Setting CRYTOSAGE_STORAGE_PASSWORD before creating identities derives the key with scrypt; keep the password securely and use the same setting on every launch. Existing storage cannot be switched by merely changing this variable. The demonstration's public-contact directory contains public keys only and does not authorize trust automatically.
 
-Plaintext messages and session chains live in process memory. The browser receives local plaintext to display it. They are not persisted as chat history by the application. Secret fields are excluded from public state and the dashboard, but Python immutable byte objects can leave copies in memory. Garbage collection does not provide verifiable secure erasure, and deleting a variable does not prove its bytes were overwritten.
+The local browser and client process see plaintext. Encrypted conversation history persists locally; session and ratchet chains are not persisted and a new handshake is needed after restart. Secret fields are excluded from public state and the dashboard, but Python immutable byte objects can leave copies in memory. Garbage collection does not provide verifiable secure erasure, and deleting a variable does not prove its bytes were overwritten.
 
 Keep test identities separate from any real identity. Do not publish `.runtime/`, `.venv/`, `.local/`, or build caches. The Git ignore file excludes these generated directories.
 
@@ -45,4 +45,4 @@ The symmetric chain has no new entropy between post-quantum re-keys. Compromise 
 
 ## Future work
 
-Useful research extensions include an independently reviewed protocol specification, formal state-machine analysis, tighter native secret handling, continuous native-memory profiling, transport-aware benchmark decomposition, bounded skipped-message handling, authenticated delivery receipts, and a reviewed hybrid key combiner. These changes require their own security analysis rather than adding feature flags to the current guarantees.
+Useful research extensions include an independently reviewed protocol specification, formal state-machine analysis, tighter native secret handling, continuous native-memory profiling, transport-aware benchmark decomposition, bounded skipped-message handling, independent review of authenticated delivery receipts, and a reviewed hybrid key combiner. These changes require their own security analysis rather than adding feature flags to the current guarantees.

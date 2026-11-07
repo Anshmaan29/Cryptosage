@@ -1,0 +1,53 @@
+name: Research prototype checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      test_macos:
+        description: Also run documented macOS source-build checks
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: ./scripts/setup.sh
+        env:
+          BUILD_JOBS: '2'
+      - run: .venv/bin/python -m pip install -r requirements-dev.txt
+      - run: .venv/bin/ruff check .
+      - run: .venv/bin/ruff format --check .
+      - run: .venv/bin/mypy --ignore-missing-imports scripts/diagnose.py scripts/demo.py client/reports.py
+      - run: ./scripts/run_tests.sh --cov=crypto --cov=protocol --cov=policy --cov=client --cov=server --cov=attacks --cov-report=term-missing --cov-report=xml:reports/coverage.xml
+      - run: ./scripts/run_benchmarks.sh --trials 2 --output reports/ci-benchmarks
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-observed-reports
+          path: reports/
+  macos:
+    if: github.event_name == 'workflow_dispatch' && inputs.test_macos
+    runs-on: macos-14
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: ./scripts/setup.sh
+        env:
+          BUILD_JOBS: '2'
+      - run: ./scripts/run_tests.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-observed-reports
+          path: reports/

@@ -1,6 +1,6 @@
 # Security policy
 
-`policy/policy.json` is the default configuration. Each client may load a different file with `--policy`. The client loads it when the process starts, and binds its policy and measured profile into negotiation signatures.
+`policy/policy.json` is the default configuration. Each client may load a different file with `--policy`. Each client loads its local policy at startup and binds its policy and measured profile into negotiation signatures. The policy manager saves changes per client for new sessions; established sessions keep their negotiated rules. Relaxations require explicit confirmation. The manager enforces a minimum level of 3 and a re-key interval from 1 to 100 messages.
 
 ```json
 {

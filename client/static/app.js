@@ -34,7 +34,7 @@ function icon(name) {
 }
 function setText(id, value) { $(id).textContent = value ?? '—'; }
 function peer() { return (state?.contacts || []).find((c) => c.name === selectedPeer); }
-function hasSession() { return !!state?.session && state.session.peer === selectedPeer; }
+function hasSession() { return !!state?.session && state.session.peer === selectedPeer && !peer()?.identity_changed; }
 function notify(message, success = false) {
   setText('notice-text', message);
   $('notice').classList.toggle('success', success);
@@ -63,7 +63,9 @@ async function request(path, body) {
   try { data = await response.json(); } catch { throw new Error(`The local client returned an unreadable response (${response.status}).`); }
   if (!response.ok) {
     const detail = data.detail ?? data.error ?? data.message;
-    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail || `Request failed (${response.status})`));
+    const error = new Error(typeof detail === 'string' ? detail : JSON.stringify(detail || `Request failed (${response.status})`));
+    error.decision = data.decision;
+    throw error;
   }
   return data;
 }
@@ -73,7 +75,7 @@ async function action(key, button, callback) {
   const original = button?.textContent;
   if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); }
   try { await callback(); await refresh(); }
-  catch (error) { notify(error.message || 'The operation could not complete. Try again.'); }
+  catch (error) { notify(error.message || 'The operation could not complete. Try again.'); if (error.decision && typeof renderSelection === 'function') renderSelection(error.decision); }
   finally {
     pending.delete(key);
     if (button) { button.disabled = false; button.removeAttribute('aria-busy'); if (original && !button.childElementCount) button.textContent = original; }
@@ -121,13 +123,16 @@ function renderStatus() {
   setText('detail-trust', trusted ? 'Verified fingerprint' : 'Not verified');
   setText('detail-relay', online ? 'Connected' : 'Disconnected');
   setText('detail-handshake', session?.handshake_ms != null ? `${formatNumber(session.handshake_ms)} ms` : 'Not measured');
+  $('reconnect-button').disabled = !contact || !online || !!state.negotiating || pending.has('connect');
+  $('reconnect-button').hidden = !!session && !state.negotiating;
+  setText('reconnect-button', state.negotiating ? 'Negotiating…' : trusted ? 'Establish secure session' : 'Verify contact');
   $('rekey-button').disabled = !session || !online || !!requestedSession || !!state.negotiating || pending.has('rekey');
   $('start-button').disabled = !contact || !online || !!requestedSession || !!state.negotiating || pending.has('connect');
   $('start-button').firstChild.textContent = trusted ? 'Establish secure session' : 'Verify contact to begin';
   $('message-input').disabled = !session || !online || !!state.negotiating || pending.has('message');
   $('send-button').disabled = !session || !online || !!state.negotiating || pending.has('message') || !$('message-input').value.trim();
   $('message-input').placeholder = session ? `Message ${contact?.name || 'your contact'}…` : 'Establish a session to write a message…';
-  setText('composer-status', session ? 'Encrypted on your local client' : 'No encrypted session');
+  setText('composer-status', state.negotiating ? 'Waiting for authenticated peer confirmation' : session ? 'Encrypted locally; delivered means peer authenticated receipt' : online ? 'Reconnect securely before sending' : 'Relay offline; history remains on this client');
   setText('lab-session-status', session ? 'Authenticated session active' : 'No session established');
   setText('lab-algorithm', session?.algorithm || 'Not established');
   setText('lab-security-level', session?.security_level ? `NIST level ${session.security_level}` : '—');
@@ -141,12 +146,12 @@ function renderMessages() {
   $('conversation-empty').hidden = !!messages.length;
   $('messages').hidden = !messages.length;
   if (!messages.length && established) {
-    $('conversation-empty').querySelector('h3').textContent = 'A private channel.\nAn open conversation.';
-    $('conversation-empty').querySelector('p').textContent = 'Your authenticated session is ready.\nSend the first encrypted message below.';
+    $('conversation-empty').querySelector('h3').textContent = 'A private channel. An open conversation.';
+    $('conversation-empty').querySelector('p').textContent = 'Your authenticated session is ready. Send the first encrypted message below.';
     $('start-button').hidden = true;
   } else if (!messages.length) {
-    $('conversation-empty').querySelector('h3').replaceChildren(document.createTextNode('Just between'), document.createElement('br'), document.createTextNode('the two of you.'));
-    $('conversation-empty').querySelector('p').replaceChildren(document.createTextNode('Start with a verified identity.'), document.createElement('br'), document.createTextNode('Your local clients handle the encryption.'));
+    $('conversation-empty').querySelector('h3').textContent = 'Just between the two of you.';
+    $('conversation-empty').querySelector('p').textContent = 'Start with a verified identity. Your local clients handle the encryption.';
     $('start-button').hidden = false;
   }
   if (signature === messageSignature) return;
@@ -154,17 +159,48 @@ function renderMessages() {
   const scroll = $('message-scroll');
   const nearEnd = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 150;
   const list = $('messages');
-  list.replaceChildren();
-  for (const message of messages) {
+  if (list.dataset.peer !== selectedPeer) { list.replaceChildren(); list.dataset.peer = selectedPeer || ''; }
+  const existing = new Map([...list.children].map((el) => [el.dataset.messageId, el]));
+  const retained = new Set();
+  let received = 0;
+  for (const [index, message] of messages.entries()) {
+    const id = String(message.id || `${message.time}-${index}`);
+    retained.add(id);
     const sent = message.direction === 'sent';
-    const item = node('li', 'message ' + (sent ? 'sent' : 'received'));
-    item.append(node('div', 'message-content', message.text));
-    const meta = node('span', 'message-meta');
-    meta.append(node('span', '', `${sent ? 'You' : selectedPeer || 'Contact'}, ${formatTime(message.time || message.timestamp)}`));
-    if (sent) meta.append(icon('lock'));
-    item.append(meta);
-    list.append(item);
+    let item = existing.get(id);
+    if (!item) {
+      item = node('li', 'message ' + (sent ? 'sent' : 'received'));
+      item.dataset.messageId = id;
+      item.append(node('div', 'message-content', message.text));
+      item.append(node('div', 'message-meta'));
+      list.append(item);
+      if (!sent) received++;
+    }
+    const meta = item.querySelector('.message-meta');
+    const statusSignature = JSON.stringify([message.status, message.error]);
+    if (meta.dataset.signature !== statusSignature) {
+      meta.dataset.signature = statusSignature;
+      meta.replaceChildren();
+      const timestamp = node('time', '', `${sent ? 'You' : selectedPeer || 'Contact'}, ${formatTime(message.time || message.timestamp)}`);
+      if (message.time) { timestamp.dateTime = message.time; timestamp.title = new Date(message.time).toLocaleString(); }
+      meta.append(timestamp);
+      if (sent) {
+        const labels = {pending:'Pending',sent:'Sent; awaiting peer receipt',delivered:'Delivered',failed:'Failed'};
+        const status = node('span', 'delivery-status status-' + (message.status || 'unknown'), labels[message.status] || 'Delivery unconfirmed');
+        status.title = message.status === 'delivered' ? 'The peer authenticated and recorded this message. This is not a read receipt.' : message.error || '';
+        meta.append(status);
+        if (message.status === 'failed' && message.id) {
+          const retry = node('button', 'retry-button', 'Resend (may duplicate)');
+          retry.type = 'button';
+          retry.title = message.error || 'Resend in a fresh authenticated session; the recipient may already have received the original.';
+          retry.addEventListener('click', () => action('retry-' + id, retry, () => request('/api/message/' + encodeURIComponent(id) + '/retry', {})));
+          meta.append(retry);
+        }
+      }
+    }
   }
+  for (const [id, item] of existing) if (!retained.has(id)) item.remove();
+  if (received && existing.size) setText('message-announcement', `${received} new message${received === 1 ? '' : 's'} from ${selectedPeer}.`);
   if (nearEnd || messages.at(-1)?.direction === 'sent') requestAnimationFrame(() => { scroll.scrollTop = scroll.scrollHeight; });
 }
 function renderEvents() {
@@ -207,6 +243,7 @@ function render() {
     }
   }
   renderContacts(); renderStatus(); renderMessages(); renderEvents(); renderMetrics();
+  if (typeof renderV2 === 'function') renderV2();
 }
 async function refresh() {
   if (refreshing) return;
@@ -220,17 +257,21 @@ async function refresh() {
     $('message-input').disabled = true;
     $('send-button').disabled = true;
     $('start-button').disabled = true;
+    $('reconnect-button').disabled = true;
     setText('detail-relay', 'Local client unavailable');
   } finally { refreshing = false; }
 }
 function route() {
   const route = location.hash.slice(1);
-  const lab = ['overview', 'attacks', 'benchmarks'].includes(route);
+  const sections = ['overview','selection','policy','protocol','attacks','benchmarks','research','demo'];
+  const lab = sections.includes(route);
   $('messages-view').hidden = lab;
   $('lab-view').hidden = !lab;
   document.querySelectorAll('[data-view]').forEach((link) => { const active = lab ? link.dataset.view === 'overview' : link.dataset.view === 'messages'; link.classList.toggle('active', active); if (active) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current'); });
-  for (const name of ['overview', 'attacks', 'benchmarks']) $(name + '-section').hidden = route !== name;
+  for (const name of sections) $(name + '-section').hidden = route !== name;
   document.querySelectorAll('[data-lab]').forEach((link) => { const active = link.dataset.lab === route; link.classList.toggle('active', active); if (active) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current'); });
+  document.body.classList.toggle('lab-active', lab);
+  if (typeof loadV2Route === 'function') loadV2Route(route);
   if (route === 'benchmarks') request('/api/benchmarks').then(renderBenchmarks).catch((error) => notify(error.message));
 }
 function openVerification() {
@@ -240,6 +281,11 @@ function openVerification() {
   setText('self-fingerprint', state.identity?.fingerprint);
   setText('verify-peer-name', contact.name);
   setText('peer-fingerprint', contact.fingerprint || 'Fingerprint unavailable. Start the peer client.');
+  setText('self-safety', state.identity?.safety_number || (state.identity?.fingerprint || '').match(/.{1,4}/g)?.join(' '));
+  setText('peer-safety', contact.safety_number || (contact.fingerprint || '').match(/.{1,4}/g)?.join(' '));
+  $('identity-change-warning').hidden = !contact.identity_changed;
+  setText('previous-fingerprint', contact.pinned_fingerprint || contact.previous_fingerprint || 'Previous pin unavailable');
+  $('replace-identity').checked = false;
   $('trusted-fingerprint').value = '';
   $('verify-error').hidden = true;
   $('verify-dialog').showModal();
@@ -247,11 +293,23 @@ function openVerification() {
 function renderAttack(result) {
   const output = $('attack-result');
   output.replaceChildren(icon('shield'));
-  const blocked = result.blocked ?? result.rejected ?? result.passed;
-  output.append(node('h3', '', blocked === true ? 'Attack rejected.' : blocked === false ? 'Attack was not rejected.' : 'Experiment completed.'));
-  output.append(node('p', '', result.reason || result.detail || result.message || 'Inspect the recorded outcome below.'));
-  const code = node('code', 'result-code', JSON.stringify(result, null, 2));
-  output.append(code);
+  const status = result.status || (result.blocked === true ? 'blocked' : result.blocked === false ? 'accepted' : 'inconclusive');
+  output.dataset.status = status;
+  const titles = {blocked:'Attack rejected.',accepted:'Attack was not rejected.',inconclusive:'Result inconclusive.',infrastructure_error:'Experiment could not run.'};
+  output.append(node('h3', '', titles[status] || 'Result inconclusive.'));
+  output.append(node('p', '', result.reason || result.detail || 'No protocol outcome was recorded.'));
+  const details = node('dl', 'attack-facts');
+  for (const [label,value] of [['Objective',result.objective],['Mutation',result.mutation],['Observed response',result.protocol_response],['Execution time',result.elapsed_ms != null ? formatNumber(result.elapsed_ms,2)+' ms' : null]]) {
+    if (value) { details.append(node('dt','',label),node('dd','',typeof value === 'object' ? JSON.stringify(value) : value)); }
+  }
+  output.append(details);
+  if (Array.isArray(result.timeline)) {
+    const timeline = node('ol','attack-timeline');
+    for (const event of result.timeline) timeline.append(node('li','',typeof event === 'string' ? event : event.detail || event.phase || event.event || JSON.stringify(event)));
+    output.append(timeline);
+  }
+  const raw = node('details'); raw.append(node('summary','','Inspect sanitized experiment record'),node('pre','json-output',JSON.stringify(result,null,2)));output.append(raw);
+  if (typeof rememberAttack === 'function') rememberAttack(result);
 }
 function renderReport(report) {
   const output = $('test-report');
@@ -274,6 +332,7 @@ function renderBenchmarks(data) {
   if (!data || !Object.keys(data).length || data.status === 'not_run') return;
   const output = $('benchmark-output');
   output.replaceChildren();
+  if (typeof rememberBenchmark === 'function') rememberBenchmark(data);
   const results = Array.isArray(data) ? data : data.algorithms || data.results || data.benchmarks;
   if (!Array.isArray(results) && (typeof results !== 'object' || !results)) { output.append(node('pre', 'json-output', JSON.stringify(data, null, 2))); return; }
   const entries = Array.isArray(results) ? results.map((r) => [r.algorithm || r.name || 'Algorithm', r]) : Object.entries(results);
@@ -328,7 +387,10 @@ $('verify-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   await action('trust', $('trust-submit'), async () => {
     try {
-      await request('/api/trust', { peer: selectedPeer, fingerprint: $('trusted-fingerprint').value.trim() });
+      const contact = peer();
+      const replacement = !!contact?.identity_changed;
+      if (replacement && !$('replace-identity').checked) throw new Error('Explicitly confirm that you independently verified the replacement identity.');
+      await request('/api/trust', { peer: selectedPeer, fingerprint: $('trusted-fingerprint').value.trim(), ...(replacement ? {replace:true,previous_fingerprint:contact.pinned_fingerprint || contact.previous_fingerprint} : {}) });
       $('verify-dialog').close(); notify('Contact fingerprint verified. You can now establish a session.', true);
     } catch (error) { setText('verify-error', error.message); $('verify-error').hidden = false; throw error; }
   });
@@ -356,9 +418,65 @@ $('rekey-button').addEventListener('click', () => {
 });
 $('attack-scenario').addEventListener('change', () => setText('attack-explanation', descriptions[$('attack-scenario').value]));
 $('attack-form').addEventListener('submit', (event) => { event.preventDefault(); action('attack', $('attack-button'), async () => renderAttack(await request('/api/attack', { scenario: $('attack-scenario').value }))); });
-$('benchmark-button').addEventListener('click', () => action('benchmark', $('benchmark-button'), async () => { setText('benchmark-button', 'Measuring…'); renderBenchmarks(await request('/api/benchmark', { trials: 10 })); setText('benchmark-button', 'Run 10 trials'); }));
+
 $('report-button').addEventListener('click', () => action('report', $('report-button'), async () => renderReport(await request('/api/report'))));
 $('dismiss-notice').addEventListener('click', () => { $('notice').hidden = true; });
+$('reconnect-button').addEventListener('click', () => $('start-button').click());
+$('theme-toggle').addEventListener('click', () => {
+  const dark = document.documentElement.dataset.theme !== 'dark';
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  localStorage.setItem('crytosage-theme', dark ? 'dark' : 'light');
+  $('theme-toggle').setAttribute('aria-pressed', String(dark));
+});
+document.documentElement.dataset.theme = localStorage.getItem('crytosage-theme') || 'light';
+$('details-toggle').addEventListener('click', () => { const panel = $('session-details'); panel.hidden = !panel.hidden; $('details-toggle').setAttribute('aria-expanded', String(!panel.hidden)); });
+$('contacts-toggle').addEventListener('click', () => { const panel = $('contacts-panel'); panel.classList.toggle('mobile-open'); $('contacts-toggle').setAttribute('aria-expanded', String(panel.classList.contains('mobile-open'))); });
+$('benchmark-trials').addEventListener('change', () => { $('custom-trials-wrap').hidden = $('benchmark-trials').value !== 'custom'; });
+$('benchmark-button').addEventListener('click', () => action('benchmark', $('benchmark-button'), async () => {
+  const trials = Number($('benchmark-trials').value === 'custom' ? $('benchmark-custom').value : $('benchmark-trials').value);
+  setText('benchmark-progress', 'Measuring real operations; please wait…');
+  try { renderBenchmarks(await request('/api/benchmark', {trials, delay_ms:Number($('benchmark-delay').value)})); setText('benchmark-progress', 'Measurements completed.'); }
+  catch (error) { setText('benchmark-progress', 'Benchmark did not complete.'); throw error; }
+}));
+let loadedPolicy = null;
+async function loadPolicy() {
+  const data = await request('/api/policy'); loadedPolicy = data.policy;
+  $('policy-level').value = loadedPolicy.minimum_security_level;
+  $('policy-performance').value = loadedPolicy.performance_preference;
+  $('policy-rekey').value = loadedPolicy.rekey_interval || 100;
+  $('policy-experimental').checked = loadedPolicy.allow_experimental;
+  $('policy-json').textContent = JSON.stringify(loadedPolicy, null, 2);
+  $('policy-algorithms').replaceChildren();
+  for (const [name, rule] of Object.entries(loadedPolicy.algorithms)) {
+    const label = node('label', '', name + ' '); const select = node('select'); select.dataset.algorithm = name;
+    for (const value of ['recommended','experimental','prohibited']) { const option = node('option', '', value); option.value = value; select.append(option); }
+    select.value = rule.status; label.append(select); $('policy-algorithms').append(label);
+  }
+  setText('policy-status','Changes apply to new sessions.');
+}
+$('policy-form').addEventListener('submit', (event) => { event.preventDefault(); action('policy', $('policy-save'), async () => {
+  const policy = structuredClone(loadedPolicy); policy.minimum_security_level = Number($('policy-level').value);
+  policy.performance_preference = $('policy-performance').value; policy.rekey_interval = Number($('policy-rekey').value);
+  policy.allow_experimental = $('policy-experimental').checked;
+  document.querySelectorAll('[data-algorithm]').forEach((select) => { policy.algorithms[select.dataset.algorithm].status = select.value; });
+  await request('/api/policy', {policy, confirm_restrictions:$('policy-confirm').checked}); await loadPolicy(); notify('Policy saved for future sessions.', true);
+}); });
+$('policy-reset').addEventListener('click', () => { if (!confirm('Restore defaults for future sessions? This may relax your current policy.')) return; action('policy-reset', $('policy-reset'), async () => { await request('/api/policy/reset', {confirm_restrictions:true}); await loadPolicy(); }); });
+$('protocol-refresh').addEventListener('click', refresh);
+function renderV2() {
+  const decision = state.session?.decision;
+  if (decision) $('selection-output').textContent = JSON.stringify(decision, null, 2);
+  const list = $('protocol-events'); list.replaceChildren();
+  for (const event of (state.events || []).slice().reverse()) list.append(node('li', '', `${formatTime(event.time)} · ${humanLabel(event.kind)} · ${event.detail}`));
+  if (!list.children.length) list.append(node('li', 'empty-table', 'No events recorded yet.'));
+  const details = $('encryption-overview'); details.replaceChildren();
+  if (state.session) details.append(node('p', '', `Session ${state.session.session_id.slice(0,12)} · ML-DSA-65 · re-key after ${state.session.rekey_interval} messages`));
+}
+async function loadV2Route(routeName) {
+  if (routeName === 'policy') { try { await loadPolicy(); } catch (error) { notify(error.message); } }
+  if (routeName === 'attacks') { try { const rows = await request('/api/attacks'); const select = $('attack-scenario'); const current = select.value; select.replaceChildren(); for (const row of rows) { const option = node('option', '', row.name); option.value = row.id; select.append(option); } select.value = current; } catch (error) { notify(error.message); } }
+  if (routeName === 'demo') { const other = location.port === '8001' ? '8002' : location.port === '8002' ? '8001' : null; $('demo-open-peer').hidden = !other; if (other) $('demo-open-peer').href = `${location.protocol}//${location.hostname}:${other}/`; const steps = ['Verify both identities', 'Establish an authenticated session', 'Inspect algorithm selection', 'Exchange messages', 'Inspect protocol events', 'Run a downgrade experiment', 'Compare benchmark results', 'Renew session keys', 'Export reports']; $('demo-steps').replaceChildren(...steps.map((step) => node('li', '', step))); }
+}
 window.addEventListener('hashchange', route);
 setText('client-endpoint', location.origin);
 route();

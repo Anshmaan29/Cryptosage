@@ -1,12 +1,15 @@
 """Policy regression checks against actual installed liboqs capabilities."""
-from copy import deepcopy
+
 import pytest
 from crypto.primitives import available_algorithms
 from policy.engine import PolicyError, load_policy, select
 
 
 def offer():
-    return {"algorithms": [item["name"] for item in available_algorithms()], "policy": load_policy()}
+    return {
+        "algorithms": [item["name"] for item in available_algorithms()],
+        "policy": load_policy(),
+    }
 
 
 def test_default_selects_recommended_real_implementation():
@@ -45,8 +48,14 @@ def test_symmetric_signed_measurement_selection():
         value["policy"]["allow_experimental"] = True
         for rule in value["policy"]["algorithms"].values():
             rule.update(status="experimental", priority=1)
-    left["measurements"] = {"ML-KEM-768": {"handshake_ms": 10}, "HQC-3": {"handshake_ms": 1}}
-    right["measurements"] = {"ML-KEM-768": {"handshake_ms": 12}, "HQC-3": {"handshake_ms": 2}}
+    left["measurements"] = {
+        "ML-KEM-768": {"handshake_ms": 10},
+        "HQC-3": {"handshake_ms": 1},
+    }
+    right["measurements"] = {
+        "ML-KEM-768": {"handshake_ms": 12},
+        "HQC-3": {"handshake_ms": 2},
+    }
     assert select(left, right) == select(right, left)
     assert select(left, right)["algorithm"] == "HQC-3"
 
@@ -55,11 +64,16 @@ def test_security_preference_precedes_performance():
     left, right = offer(), offer()
     for value in (left, right):
         value["policy"]["allow_experimental"] = True
-        value["measurements"] = {"ML-KEM-768": {"handshake_ms": 1000}, "HQC-3": {"handshake_ms": 0}}
+        value["measurements"] = {
+            "ML-KEM-768": {"handshake_ms": 1000},
+            "HQC-3": {"handshake_ms": 0},
+        }
     assert select(left, right)["algorithm"] == "ML-KEM-768"
 
 
-@pytest.mark.parametrize("names", [["unknown"], ["ML-KEM-768", "ML-KEM-768"], "ML-KEM-768", [None]])
+@pytest.mark.parametrize(
+    "names", [["unknown"], ["ML-KEM-768", "ML-KEM-768"], "ML-KEM-768", [None]]
+)
 def test_reject_malformed_offers(names):
     left, right = offer(), offer()
     left["algorithms"] = names
@@ -78,5 +92,5 @@ def test_reject_invalid_security_levels(minimum):
 def test_nonfinite_and_enormous_measurements_cannot_crash_selection():
     left, right = offer(), offer()
     left["measurements"] = {"ML-KEM-768": {"handshake_ms": 10**10000}}
-    right["measurements"] = {"ML-KEM-768": {"handshake_ms": float('nan')}}
+    right["measurements"] = {"ML-KEM-768": {"handshake_ms": float("nan")}}
     assert select(left, right)["algorithm"] == "ML-KEM-768"

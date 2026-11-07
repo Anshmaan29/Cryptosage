@@ -11,7 +11,7 @@
 7. Open **Security lab → Attack lab**. Run each isolated experiment and read its actual reason. Explain the difference between a signature failure, identity pin mismatch, replay rejection, invalid length, and AEAD failure.
 8. Run ten benchmark trials in the UI, or run thirty through the CLI. Compare ML-KEM-768 with HQC-3 at level 3. Identify the experimental status and the limits of local memory/timing measurements.
 9. Run the automated evaluation and inspect the newly written report. Retain failures if any appear.
-10. Stop and restart a client. Its identity and pins persist; its old session and message history do not. Establish a new session.
+10. Stop and restart a client. Its identity and pins persist; its encrypted message history persists while its old live session does not. Establish a new session.
 
 For a policy demonstration, use the examples in [Policy](POLICY.md) to prohibit an algorithm or require an unavailable security level. Both clients must refuse the resulting unacceptable session. Restore the normal policy for the rest of the demonstration.
 

@@ -3,7 +3,14 @@
   "allow_experimental": false,
   "performance_preference": "latency",
   "algorithms": {
-    "ML-KEM-768": {"status": "recommended", "priority": 1},
-    "HQC-3": {"status": "experimental", "priority": 2}
-  }
+    "ML-KEM-768": {
+      "status": "recommended",
+      "priority": 1
+    },
+    "HQC-3": {
+      "status": "experimental",
+      "priority": 2
+    }
+  },
+  "rekey_interval": 100
 }

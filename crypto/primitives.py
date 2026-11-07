@@ -1,4 +1,5 @@
 """Strict adapters around liboqs; no fallback or simulated cryptography."""
+
 from __future__ import annotations
 
 import importlib.metadata
@@ -25,11 +26,19 @@ class CryptoError(ValueError):
 
 @lru_cache(maxsize=1)
 def _oqs() -> Any:
-    prefix = Path(os.environ.get("OQS_INSTALL_PATH", Path(__file__).resolve().parents[1] / ".local"))
+    prefix = Path(
+        os.environ.get(
+            "OQS_INSTALL_PATH", Path(__file__).resolve().parents[1] / ".local"
+        )
+    )
     candidates = [*prefix.glob("lib/liboqs.*"), *prefix.glob("lib64/liboqs.*")]
-    if not any(p.suffix in {".so", ".dylib", ".dll"} or ".so." in p.name for p in candidates):
+    if not any(
+        p.suffix in {".so", ".dylib", ".dll"} or ".so." in p.name for p in candidates
+    ):
         # liboqs-python otherwise attempts an implicit source installation on import.
-        raise CryptoError("liboqs is unavailable; run scripts/setup_crypto.sh before starting")
+        raise CryptoError(
+            "liboqs is unavailable; run scripts/setup_crypto.sh before starting"
+        )
     os.environ.setdefault("OQS_INSTALL_PATH", str(prefix))
     # The upstream binding logs its import banner to stdout; reserve stdout for CLI JSON.
     with redirect_stdout(sys.stderr):
@@ -41,7 +50,10 @@ def _oqs() -> Any:
 
 def _bytes(value: bytes, label: str, length: int | None = None) -> None:
     if not isinstance(value, bytes) or (length is not None and len(value) != length):
-        raise CryptoError(f"invalid {label}" + (f" length (expected {length} bytes)" if length is not None else " type"))
+        raise CryptoError(
+            f"invalid {label}"
+            + (f" length (expected {length} bytes)" if length is not None else " type")
+        )
 
 
 def _kem(name: str, secret: bytes | None = None) -> Any:
@@ -65,16 +77,21 @@ def available_algorithms() -> list[dict[str, Any]]:
             continue
         with _kem(name) as kem:
             d = kem.details
-            result.append({
-                "name": name, "security_level": d["claimed_nist_level"],
-                "public_key_bytes": d["length_public_key"],
-                "secret_key_bytes": d["length_secret_key"],
-                "ciphertext_bytes": d["length_ciphertext"],
-                "shared_secret_bytes": d["length_shared_secret"],
-                "status": "recommended" if name == "ML-KEM-768" else "experimental",
-                "implementation_version": d["version"],
-                "standardization": "FIPS 203" if name == "ML-KEM-768" else "Selected for future standardization; 2025-08-22 specification",
-            })
+            result.append(
+                {
+                    "name": name,
+                    "security_level": d["claimed_nist_level"],
+                    "public_key_bytes": d["length_public_key"],
+                    "secret_key_bytes": d["length_secret_key"],
+                    "ciphertext_bytes": d["length_ciphertext"],
+                    "shared_secret_bytes": d["length_shared_secret"],
+                    "status": "recommended" if name == "ML-KEM-768" else "experimental",
+                    "implementation_version": d["version"],
+                    "standardization": "FIPS 203"
+                    if name == "ML-KEM-768"
+                    else "Selected for future standardization; 2025-08-22 specification",
+                }
+            )
     return result
 
 
@@ -119,21 +136,29 @@ def sign(secret: bytes, message: bytes) -> bytes:
 def verify(public: bytes, message: bytes, signature: bytes) -> bool:
     with _oqs().Signature(SIGNATURE) as verifier:
         d = verifier.details
-        if (not isinstance(public, bytes) or len(public) != d["length_public_key"]
-                or not isinstance(signature, bytes) or len(signature) != d["length_signature"]
-                or not isinstance(message, bytes)):
+        if (
+            not isinstance(public, bytes)
+            or len(public) != d["length_public_key"]
+            or not isinstance(signature, bytes)
+            or len(signature) != d["length_signature"]
+            or not isinstance(message, bytes)
+        ):
             return False
         return verifier.verify(message, signature, public)
 
 
-def hkdf(secret: bytes, info: bytes, length: int = 32, salt: bytes | None = None) -> bytes:
+def hkdf(
+    secret: bytes, info: bytes, length: int = 32, salt: bytes | None = None
+) -> bytes:
     _bytes(secret, "HKDF input")
     _bytes(info, "HKDF domain")
     if not secret or not info or type(length) is not int or not 1 <= length <= 8160:
         raise CryptoError("invalid HKDF parameters")
     if salt is not None:
         _bytes(salt, "HKDF salt")
-    return HKDF(algorithm=hashes.SHA256(), length=length, salt=salt, info=info).derive(secret)
+    return HKDF(algorithm=hashes.SHA256(), length=length, salt=salt, info=info).derive(
+        secret
+    )
 
 
 def encrypt(key: bytes, nonce: bytes, plaintext: bytes, aad: bytes) -> bytes:
@@ -159,8 +184,12 @@ def decrypt(key: bytes, nonce: bytes, ciphertext: bytes, aad: bytes) -> bytes:
 
 def versions() -> dict[str, str]:
     oqs = _oqs()
-    return {"liboqs": oqs.oqs_version(), "liboqs_python": oqs.oqs_python_version(),
-            "cryptography": importlib.metadata.version("cryptography"),
-            "python": platform.python_version(), "signature": SIGNATURE,
-            "liboqs_commit": "5a1a854b0dc9f2141bdc771c555ee60c37950183",
-            "liboqs_python_commit": "64c76ad0a80d6c69f2003219eb27b253782a3d68"}
+    return {
+        "liboqs": oqs.oqs_version(),
+        "liboqs_python": oqs.oqs_python_version(),
+        "cryptography": importlib.metadata.version("cryptography"),
+        "python": platform.python_version(),
+        "signature": SIGNATURE,
+        "liboqs_commit": "5a1a854b0dc9f2141bdc771c555ee60c37950183",
+        "liboqs_python_commit": "64c76ad0a80d6c69f2003219eb27b253782a3d68",
+    }

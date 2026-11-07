@@ -1,4 +1,5 @@
 """Authenticate these offers in the protocol before accepting selection results."""
+
 from __future__ import annotations
 
 import json
@@ -11,6 +12,15 @@ from crypto.primitives import available_algorithms
 
 class PolicyError(ValueError):
     """No valid, mutually acceptable secure algorithm can be selected."""
+
+    def __init__(self, message: str, decision: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.decision = decision or {
+            "candidates": [],
+            "steps": [{"stage": "validation", "detail": message}],
+            "performance": {},
+            "selected": None,
+        }
 
 
 KNOWN = {"ML-KEM-768": 3, "HQC-3": 3}
@@ -37,6 +47,9 @@ def validate_policy(policy: dict[str, Any]) -> dict[str, Any]:
         raise PolicyError("allow_experimental must be a boolean")
     if policy.get("performance_preference") not in PREFERENCES:
         raise PolicyError("Unsupported performance preference")
+    interval = policy.get("rekey_interval", 100)
+    if type(interval) is not int or not 1 <= interval <= 100:
+        raise PolicyError("Re-key interval must be an integer from 1 to 100 messages")
     rules = policy.get("algorithms")
     if not isinstance(rules, dict) or not rules or len(rules) > 16:
         raise PolicyError("Policy must contain algorithm rules")
@@ -60,15 +73,21 @@ def _offer(offer: dict[str, Any]) -> tuple[set[str], dict[str, Any]]:
     if not isinstance(offer, dict):
         raise PolicyError("Offer must be an object")
     names = offer.get("algorithms")
-    if (not isinstance(names, list) or len(names) > 16
-            or any(not isinstance(name, str) or name not in KNOWN for name in names)
-            or len(set(names)) != len(names)):
+    if (
+        not isinstance(names, list)
+        or len(names) > 16
+        or any(not isinstance(name, str) or name not in KNOWN for name in names)
+        or len(set(names)) != len(names)
+    ):
         raise PolicyError("Malformed or unsupported algorithm offer")
     return set(names), validate_policy(offer.get("policy"))
 
 
-def select(local_offer: dict[str, Any], peer_offer: dict[str, Any],
-           measurements: dict[str, Any] | None = None) -> dict[str, Any]:
+def select(
+    local_offer: dict[str, Any],
+    peer_offer: dict[str, Any],
+    measurements: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Choose symmetrically; performance can never override policy admissibility.
 
     Untrusted peers cannot assert availability: only this process's actual library
@@ -79,56 +98,218 @@ def select(local_offer: dict[str, Any], peer_offer: dict[str, Any],
     """
     left_names, left = _offer(local_offer)
     right_names, right = _offer(peer_offer)
-    installed = {row["name"]: row for row in available_algorithms()
-                 if row.get("available", True)}
+    installed = {
+        row["name"]: row for row in available_algorithms() if row.get("available", True)
+    }
     minimum = max(left["minimum_security_level"], right["minimum_security_level"])
+    interval = min(left.get("rekey_interval", 100), right.get("rekey_interval", 100))
     candidates: list[tuple[str, int, int]] = []
-    excluded: list[str] = []
-    for name in sorted(left_names & right_names):
+    rows = []
+    excluded = []
+    for name in sorted(KNOWN):
         row = installed.get(name)
         rules = [side["algorithms"].get(name) for side in (left, right)]
-        if row is None or KNOWN[name] < minimum:
-            excluded.append(f"{name}: implementation unavailable or security level below {minimum}")
-            continue
-        if any(rule is None or rule["status"] == "prohibited" for rule in rules):
-            excluded.append(f"{name}: denied by a local policy")
-            continue
-        experimental = any(rule["status"] == "experimental" for rule in rules)
-        experimental |= row.get("status") == "experimental"
-        if experimental and not (left["allow_experimental"] and right["allow_experimental"]):
-            excluded.append(f"{name}: experimental implementation requires both policies to opt in")
-            continue
-        candidates.append((name, int(experimental), sum(rule["priority"] for rule in rules)))
+        permitted = all(
+            rule is not None and rule["status"] != "prohibited" for rule in rules
+        )
+        compatible = name in left_names and name in right_names and row is not None
+        actual_level = row.get("security_level", 0) if row else 0
+        level = min(actual_level, KNOWN[name]) if type(actual_level) is int else 0
+        sufficient = level >= minimum
+        experimental = any(rule and rule["status"] == "experimental" for rule in rules)
+        experimental |= bool(row and row.get("status") == "experimental")
+        opted_in = not experimental or (
+            left["allow_experimental"] and right["allow_experimental"]
+        )
+        checks = [
+            {
+                "stage": "policy",
+                "passed": permitted,
+                "detail": "Both policies permit this algorithm"
+                if permitted
+                else "Denied by a local policy or missing policy rule",
+            },
+            {
+                "stage": "compatibility",
+                "passed": compatible,
+                "detail": "Offered by both clients and enabled in the local library"
+                if compatible
+                else "Not offered by both clients or implementation unavailable",
+            },
+            {
+                "stage": "security_level",
+                "passed": sufficient,
+                "detail": f"Security level {level} meets minimum {minimum}"
+                if sufficient
+                else f"Implementation unavailable or security level below {minimum}",
+            },
+            {
+                "stage": "experimental",
+                "passed": bool(opted_in),
+                "detail": "Experimental implementation explicitly allowed by both policies"
+                if experimental and opted_in
+                else "Experimental implementation requires both policies to opt in"
+                if experimental
+                else "Recommended implementation; no experimental opt-in required",
+            },
+        ]
+        eligible = all(check["passed"] for check in checks)
+        candidate = {
+            "name": name,
+            "eligible": eligible,
+            "checks": checks,
+            "security_level": level,
+            "implementation_status": row.get("status") if row else "unavailable",
+            "policy_statuses": sorted(
+                rule["status"] if rule else "missing" for rule in rules
+            ),
+        }
+        if eligible:
+            priority = sum(rule["priority"] for rule in rules)
+            candidate.update(priority=priority, experimental=bool(experimental))
+            candidates.append((name, int(experimental), priority))
+        else:
+            excluded.append(
+                name
+                + ": "
+                + "; ".join(check["detail"] for check in checks if not check["passed"])
+            )
+        rows.append(candidate)
+    steps = [
+        {
+            "stage": "candidates",
+            "detail": "Known candidates: " + ", ".join(sorted(KNOWN)),
+        },
+        {
+            "stage": "policy",
+            "detail": "Both signed policies validated; prohibited or missing rules are excluded",
+        },
+        {
+            "stage": "compatibility",
+            "detail": "Intersect both advertised capabilities with the installed implementation",
+        },
+        {
+            "stage": "security_level",
+            "detail": f"Require NIST security level {minimum}; security gates precede performance",
+        },
+    ]
+    decision = {
+        "candidates": rows,
+        "steps": steps,
+        "performance": {},
+        "selected": None,
+        "minimum_security_level": minimum,
+        "rekey_interval": interval,
+    }
     if not candidates:
-        suffix = "; ".join(excluded) or "no common offered algorithms"
-        raise PolicyError(f"No mutually acceptable secure algorithm: {suffix}")
+        message = "No mutually acceptable secure algorithm: " + (
+            "; ".join(excluded) or "no common offered algorithms"
+        )
+        steps.extend(
+            [
+                {
+                    "stage": "performance",
+                    "detail": "Not evaluated: no eligible candidates",
+                },
+                {
+                    "stage": "selection",
+                    "detail": "Session refused; no security rule was relaxed",
+                },
+            ]
+        )
+        raise PolicyError(message, decision)
     if measurements is None:
-        snapshots = [offer.get("measurements", {}) for offer in (local_offer, peer_offer)]
+        snapshots = [
+            offer.get("measurements", {}) for offer in (local_offer, peer_offer)
+        ]
         measurements = {}
         for name, _, _ in candidates:
             combined = {}
-            for metric in sorted({metric for values in PREFERENCES.values() for metric in values}):
-                values = [snapshot.get(name, {}).get(metric) if isinstance(snapshot, dict)
-                          and isinstance(snapshot.get(name), dict) else None for snapshot in snapshots]
+            for metric in sorted(
+                {metric for values in PREFERENCES.values() for metric in values}
+            ):
+                values = [
+                    snapshot.get(name, {}).get(metric)
+                    if isinstance(snapshot, dict)
+                    and isinstance(snapshot.get(name), dict)
+                    else None
+                    for snapshot in snapshots
+                ]
                 if all(_measurement(value) for value in values):
                     combined[metric] = sum(values) / len(values)
             measurements[name] = combined
-    data = (measurements or {}).get("selection_measurements", measurements or {})
+    if not isinstance(measurements, dict):
+        raise PolicyError("Measured performance profile must be an object", decision)
+    data = measurements.get("selection_measurements", measurements)
     if not isinstance(data, dict):
-        raise PolicyError("Measured performance profile must be an object")
-    metrics = sorted(set(PREFERENCES[left["performance_preference"]]
-                         + PREFERENCES[right["performance_preference"]]))
+        raise PolicyError("Measured performance profile must be an object", decision)
+    metrics = sorted(
+        set(
+            PREFERENCES[left["performance_preference"]]
+            + PREFERENCES[right["performance_preference"]]
+        )
+    )
     usable: dict[str, dict[str, float]] = {}
     for metric in metrics:
-        values = {name: data.get(name, {}).get(metric) if isinstance(data.get(name), dict) else None
-                  for name, _, _ in candidates}
+        values = {
+            name: data.get(name, {}).get(metric)
+            if isinstance(data.get(name), dict)
+            else None
+            for name, _, _ in candidates
+        }
         if all(_measurement(value) for value in values.values()):
             usable[metric] = values
+
     def score(name: str) -> float:
-        return sum(values[name] / max(max(values.values()), 1e-12) for values in usable.values())
-    chosen, experimental, priority = min(candidates, key=lambda item: (item[1], item[2], score(item[0]), item[0]))
-    measured = ", ".join(usable) if usable else "no complete comparable measured profile; deterministic name tie-break"
-    reason = (f"{chosen}: both clients permit security level {KNOWN[chosen]} (minimum {minimum}); "
-              f"{'experimental, explicitly allowed by both' if experimental else 'recommended'}; "
-              f"combined policy priority {priority}; performance: {measured}.")
-    return {"algorithm": chosen, "security_level": KNOWN[chosen], "reason": reason}
+        return sum(
+            values[name] / max(max(values.values()), 1e-12)
+            for values in usable.values()
+        )
+
+    chosen, experimental, priority = min(
+        candidates, key=lambda item: (item[1], item[2], score(item[0]), item[0])
+    )
+    same_rank = [
+        name
+        for name, exp, prio in candidates
+        if exp == experimental and prio == priority
+    ]
+    performance_used = bool(usable) and len(same_rank) > 1
+    if performance_used:
+        measured = (
+            "comparable measured "
+            + ", ".join(usable)
+            + " used among equal policy ranks"
+        )
+    elif len(candidates) == 1:
+        measured = "not used: only one eligible candidate"
+    elif usable:
+        measured = "available but policy status/priority determined selection before performance"
+    else:
+        measured = "no complete comparable measured profile; deterministic name tie-break within equal policy ranks"
+    reason = (
+        f"{chosen}: both clients permit security level {KNOWN[chosen]} (minimum {minimum}); "
+        f"{'experimental, explicitly allowed by both' if experimental else 'recommended'}; "
+        f"combined policy priority {priority}; performance: {measured}."
+    )
+    decision["performance"] = {
+        "metrics": list(usable),
+        "values": usable,
+        "scores": {name: score(name) for name, _, _ in candidates},
+        "used_for_tiebreak": performance_used,
+        "detail": measured,
+    }
+    decision["selected"] = chosen
+    steps.extend(
+        [
+            {"stage": "performance", "detail": measured},
+            {"stage": "selection", "detail": reason},
+        ]
+    )
+    return {
+        "algorithm": chosen,
+        "security_level": KNOWN[chosen],
+        "reason": reason,
+        "rekey_interval": interval,
+        "decision": decision,
+    }

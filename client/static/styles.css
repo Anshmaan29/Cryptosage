@@ -214,3 +214,11 @@ dialog .field-hint { margin: 8px 0 20px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
 
 button:active { filter: brightness(.92); }
+:root[data-theme="dark"] { --canvas:#151e1a; --surface:#1d2923; --surface-soft:#25352c; --surface-selected:#314c3a; --ink:#e4ebe2; --ink-strong:#e7f3e9; --muted:#b3c3b3; --subtle:#a3b3a3; --accent:#9bcba8; --accent-hover:#bde0c5; --on-accent:#14281c; --accent-soft:#2c4031; --border:#405347; --input-border:#91a895; --border-strong:#5d7563; --warning:#eed094; --warning-surface:#463a20; --danger:#ffb5a5; --danger-surface:#492a27; --sent:#345d49; }
+[hidden] { display:none !important; }
+@media (max-width: 700px) { #contacts-panel.mobile-open { display:block; } }
+.check-field { display:flex; align-items:center; gap:10px; margin:16px 0; }
+.check-field input[type="checkbox"] { width:18px; height:18px; min-height:18px; margin:0; flex:0 0 18px; accent-color:var(--accent); }
+.policy-fields { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+.policy-algorithms { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+@media (max-width:700px) { .policy-fields,.policy-algorithms { grid-template-columns:1fr; } }

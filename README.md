@@ -105,8 +105,8 @@ docs/         Architecture, threat model, demo and viva notes
 reports/      Actual evaluation outputs
 ```
 
-Read [Architecture and protocol](docs/ARCHITECTURE.md), [Threat model and limitations](docs/SECURITY.md), [Demo and viva](docs/DEMO.md), and [Troubleshooting](docs/TROUBLESHOOTING.md).
+Read the [V1 audit and V2 evidence](docs/AUDIT.md), [Architecture and protocol](docs/ARCHITECTURE.md), [Threat model and limitations](docs/SECURITY.md), [Demo and viva](docs/DEMO.md), and [Troubleshooting](docs/TROUBLESHOOTING.md).
 
 ## Scope
 
-The project supports one-to-one text conversations and fresh authenticated sessions. Messages remain in local process memory. It has no group chat, file transfer, voice/video, multi-device synchronization, production certificate infrastructure, or optional X25519 hybrid mode. The hash ratchet is simpler than Signal's Double Ratchet. Python cannot guarantee erasure of every secret copy, and identity files rely on filesystem permissions rather than encryption at rest.
+The project supports one-to-one text conversations and fresh authenticated sessions. Conversation history and identity files are encrypted at rest using AES-GCM. The default key is protected by local filesystem permissions; an optional passphrase offers stronger protection for copied storage. Live session and ratchet keys remain in memory and are discarded on reconnect. It has no group chat, file transfer, voice/video, multi-device synchronization, production certificate infrastructure, or optional X25519 hybrid mode. The hash ratchet is simpler than Signal's Double Ratchet. Python cannot guarantee erasure of every secret copy, and the default local master key relies on filesystem permissions; copying the entire directory or compromising the same account exposes it.

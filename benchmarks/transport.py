@@ -1,6 +1,8 @@
 """Measured loopback WebSocket transport, separate from protocol computation."""
+
 import asyncio
 import json
+import math
 import socket
 import time
 from websockets.asyncio.client import connect
@@ -8,52 +10,113 @@ from protocol.session import Peer
 from server.relay import run
 
 
-async def measure(identity_a, identity_b, policy):
+def validate_delay(delay_ms):
+    if (
+        type(delay_ms) not in (int, float)
+        or not math.isfinite(delay_ms)
+        or not 0 <= delay_ms <= 1000
+    ):
+        raise ValueError(
+            "Artificial send delay must be a finite number from 0 to 1000 ms"
+        )
+    return float(delay_ms)
+
+
+async def measure(identity_a, identity_b, policy, delay_ms=0):
+    """Delay each test endpoint send; actual routing remains a loopback relay.
+
+    This models endpoint-injected send delay, not a measured WAN and not a
+    separately measured one-way network propagation time. Startup is not timed.
+    """
+    delay_ms = validate_delay(delay_ms)
     with socket.socket() as probe:
-        probe.bind(('127.0.0.1',0))
+        probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
     task = asyncio.create_task(run(port=port))
+
+    async def send(ws, packet):
+        if delay_ms:
+            await asyncio.sleep(delay_ms / 1000)
+        await ws.send(json.dumps(packet))
+
+    async def handshake(a, b, first, second):
+        started = time.perf_counter_ns()
+        packet = a.initiate(identity_b.name)
+        for sender, receiver, peer in (
+            (first, second, b),
+            (second, first, a),
+            (first, second, b),
+            (second, first, a),
+        ):
+            await send(sender, packet)
+            packet = peer.receive(json.loads(await receiver.recv()))
+        if (
+            not a.session
+            or not b.session
+            or a.session.session_id != b.session.session_id
+        ):
+            raise RuntimeError(
+                "Network benchmark handshake did not confirm both clients"
+            )
+        return (time.perf_counter_ns() - started) / 1e6
+
     try:
-        for attempt in range(100):
+        for _ in range(100):
             try:
-                first = await connect(f'ws://127.0.0.1:{port}',proxy=None)
+                first = await connect(f"ws://127.0.0.1:{port}", proxy=None)
                 break
             except OSError:
-                await asyncio.sleep(.01)
+                await asyncio.sleep(0.01)
         else:
-            raise ValueError('Benchmark relay did not start')
-        async with first, connect(f'ws://127.0.0.1:{port}',proxy=None) as second:
-            for ws,name in ((first,identity_a.name),(second,identity_b.name)):
-                await ws.send(json.dumps({'register':name}))
-                assert json.loads(await ws.recv())['type']=='registered'
-            a,b = Peer(identity_a,policy),Peer(identity_b,policy)
-            start = time.perf_counter_ns()
-            packet = a.initiate(identity_b.name)
-            for sender,receiver,peer in ((first,second,b),(second,first,a),(first,second,b),(second,first,a)):
-                await sender.send(json.dumps(packet))
-                packet = peer.receive(json.loads(await receiver.recv()))
-            handshake = (time.perf_counter_ns()-start)/1e6
-            assert a.session and b.session
-            packet = a.session.seal('Measured loopback message')
-            start = time.perf_counter_ns()
-            await first.send(json.dumps(packet))
-            incoming = json.loads(await second.recv())
-            assert b.session.open(incoming)=='Measured loopback message'
-            reply = b.session.seal('Measured loopback reply')
-            await second.send(json.dumps(reply))
-            assert a.session.open(json.loads(await first.recv()))=='Measured loopback reply'
-            message = (time.perf_counter_ns()-start)/1e6
-            # Echo a fixed opaque envelope without any cryptographic computation.
-            probe = {'type':'transport_probe','from':identity_a.name,'to':identity_b.name,'payload':'0'*4096}
-            start = time.perf_counter_ns()
-            await first.send(json.dumps(probe))
-            echoed = json.loads(await second.recv())
-            echoed.update({'from':identity_b.name,'to':identity_a.name})
-            await second.send(json.dumps(echoed))
-            assert json.loads(await first.recv())['payload']==probe['payload']
-            rtt = (time.perf_counter_ns()-start)/1e6
-            return {'network_handshake_ms':handshake,'network_message_roundtrip_ms':message,
-                    'relay_transport_roundtrip_ms':rtt}
+            raise ValueError("Benchmark relay did not start")
+        async with first, connect(f"ws://127.0.0.1:{port}", proxy=None) as second:
+            async with asyncio.timeout(40):
+                for ws, name in ((first, identity_a.name), (second, identity_b.name)):
+                    await ws.send(json.dumps({"register": name}))
+                    registered = json.loads(await ws.recv())
+                    if registered.get("type") != "registered":
+                        raise RuntimeError("Benchmark relay registration failed")
+                a, b = Peer(identity_a, policy), Peer(identity_b, policy)
+                handshake_ms = await handshake(a, b, first, second)
+                packet = a.session.seal("Measured loopback message")
+                start = time.perf_counter_ns()
+                await send(first, packet)
+                incoming = json.loads(await second.recv())
+                if b.session.open(incoming) != "Measured loopback message":
+                    raise RuntimeError("Network message verification failed")
+                reply = b.session.seal("Measured loopback reply")
+                await send(second, reply)
+                if (
+                    a.session.open(json.loads(await first.recv()))
+                    != "Measured loopback reply"
+                ):
+                    raise RuntimeError("Network reply verification failed")
+                message_ms = (time.perf_counter_ns() - start) / 1e6
+                old_sid = a.session.session_id
+                rekey_ms = await handshake(a, b, first, second)
+                if a.session.session_id == old_sid:
+                    raise RuntimeError("Network re-key reused a session identifier")
+                # Echo a fixed opaque envelope without cryptographic computation.
+                probe = {
+                    "type": "transport_probe",
+                    "from": identity_a.name,
+                    "to": identity_b.name,
+                    "payload": "0" * 4096,
+                }
+                start = time.perf_counter_ns()
+                await send(first, probe)
+                echoed = json.loads(await second.recv())
+                echoed.update({"from": identity_b.name, "to": identity_a.name})
+                await send(second, echoed)
+                if json.loads(await first.recv())["payload"] != probe["payload"]:
+                    raise RuntimeError("Opaque transport echo differs from request")
+                rtt_ms = (time.perf_counter_ns() - start) / 1e6
+                return {
+                    "network_handshake_ms": handshake_ms,
+                    "network_message_roundtrip_ms": message_ms,
+                    "network_rekey_ms": rekey_ms,
+                    "relay_transport_roundtrip_ms": rtt_ms,
+                }
     finally:
         task.cancel()
         try:
