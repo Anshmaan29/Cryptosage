@@ -1,0 +1,12 @@
+.venv/
+.local/
+.deps/
+.runtime/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.log
+.DS_Store
+.build/
+.matplotlib-cache/
+.hallmark/

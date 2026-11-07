@@ -1,0 +1,366 @@
+'use strict';
+
+const $ = (id) => document.getElementById(id);
+let state = null;
+let selectedPeer = null;
+let messageSignature = '';
+let contactSignature = '';
+let eventSignature = '';
+let pending = new Set();
+let refreshing = false;
+let requestedSession = null;
+const descriptions = {
+  downgrade: 'Modify authenticated negotiation to try to force a different algorithm.',
+  identity: 'Substitute an identity key and check whether established contact trust rejects it.',
+  replay: 'Replay a previously accepted message and check the receiving message counter.',
+  tamper: 'Change ciphertext bytes and check authenticated decryption. Corrupted plaintext must never appear.',
+  invalid: 'Submit malformed protocol or cryptographic input and observe safe rejection.'
+};
+
+function node(tag, className, text) {
+  const el = document.createElement(tag);
+  if (className) el.className = className;
+  if (text !== undefined) el.textContent = String(text);
+  return el;
+}
+function icon(name) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'icon');
+  svg.setAttribute('aria-hidden', 'true');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', '#i-' + name);
+  svg.append(use);
+  return svg;
+}
+function setText(id, value) { $(id).textContent = value ?? '—'; }
+function peer() { return (state?.contacts || []).find((c) => c.name === selectedPeer); }
+function hasSession() { return !!state?.session && state.session.peer === selectedPeer; }
+function notify(message, success = false) {
+  setText('notice-text', message);
+  $('notice').classList.toggle('success', success);
+  $('notice').hidden = false;
+}
+function humanLabel(value) { return String(value).replaceAll('_', ' ').replaceAll('-', ' '); }
+function formatNumber(value, digits = 2) {
+  return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: digits }) : String(value ?? 'Not measured');
+}
+function formatTime(value) {
+  if (!value) return '';
+  const date = typeof value === 'number' ? new Date(value > 1e12 ? value : value * 1000) : new Date(value);
+  return Number.isNaN(date.valueOf()) ? String(value) : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+async function request(path, body) {
+  const options = { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } };
+  if (body !== undefined) {
+    if (!state?.csrf_token) throw new Error('The local client has not initialized. Wait for connection and try again.');
+    options.method = 'POST';
+    options.headers['Content-Type'] = 'application/json';
+    options.headers['X-CSRF-Token'] = state.csrf_token;
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetch(path, options);
+  let data;
+  try { data = await response.json(); } catch { throw new Error(`The local client returned an unreadable response (${response.status}).`); }
+  if (!response.ok) {
+    const detail = data.detail ?? data.error ?? data.message;
+    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail || `Request failed (${response.status})`));
+  }
+  return data;
+}
+async function action(key, button, callback) {
+  if (pending.has(key)) return;
+  pending.add(key);
+  const original = button?.textContent;
+  if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); }
+  try { await callback(); await refresh(); }
+  catch (error) { notify(error.message || 'The operation could not complete. Try again.'); }
+  finally {
+    pending.delete(key);
+    if (button) { button.disabled = false; button.removeAttribute('aria-busy'); if (original && !button.childElementCount) button.textContent = original; }
+    if (state) renderStatus();
+  }
+}
+
+function renderContacts() {
+  const contacts = state.contacts || [];
+  if (!contacts.some((c) => c.name === selectedPeer)) selectedPeer = contacts[0]?.name || null;
+  const signature = JSON.stringify([contacts, selectedPeer]);
+  if (signature === contactSignature) return;
+  contactSignature = signature;
+  setText('contact-count', contacts.length);
+  const list = $('contact-list');
+  list.replaceChildren();
+  if (!contacts.length) { list.append(node('p', 'loading-label', 'No contacts are available. Start the other local client.')); return; }
+  for (const contact of contacts) {
+    const button = node('button', 'contact-button' + (contact.name === selectedPeer ? ' selected' : ''));
+    button.type = 'button';
+    button.setAttribute('aria-pressed', String(contact.name === selectedPeer));
+    button.append(node('span', 'contact-avatar', contact.name.slice(0, 1).toUpperCase()));
+    const text = node('span', 'contact-text');
+    text.append(node('strong', '', contact.name), node('span', '', contact.identity_changed ? 'Identity changed: do not connect' : contact.verified ? 'Identity verified' : 'Verify identity to begin'));
+    button.append(text, icon(contact.verified ? 'shield' : 'message'));
+    button.addEventListener('click', () => { selectedPeer = contact.name; messageSignature = ''; render(); });
+    list.append(button);
+  }
+}
+function renderStatus() {
+  const contact = peer();
+  const session = hasSession() ? state.session : null;
+  const trusted = !!contact?.verified;
+  const online = !$('connection-warning').hidden ? false : !!state.connected;
+  setText('identity-name', state.identity?.name || 'Local identity');
+  setText('identity-avatar', (state.identity?.name || '?').slice(0, 1).toUpperCase());
+  setText('peer-name', contact?.name || 'Your next conversation');
+  setText('peer-avatar', (contact?.name || '?').slice(0, 1).toUpperCase());
+  setText('peer-status', contact?.identity_changed ? 'Identity changed: connection blocked' : session ? 'Authenticated encrypted session' : trusted ? 'Identity verified, ready to connect' : 'Identity not yet verified');
+  $('verify-button').disabled = !contact || pending.has('trust');
+  setText('session-banner-text', session ? `End-to-end encrypted with ${session.algorithm}. Identity verified locally.` : trusted ? 'Identity verified. Establish a session to exchange encrypted messages.' : 'Verify your contact before establishing an encrypted session.');
+  setText('session-state-label', session ? 'Secure session established' : 'Not connected');
+  setText('session-state-description', session ? 'Authenticated negotiation completed. Only the local clients hold the message keys.' : 'An authenticated connection starts with a verified contact.');
+  setText('detail-algorithm', session?.algorithm || 'Not established');
+  setText('detail-trust', trusted ? 'Verified fingerprint' : 'Not verified');
+  setText('detail-relay', online ? 'Connected' : 'Disconnected');
+  setText('detail-handshake', session?.handshake_ms != null ? `${formatNumber(session.handshake_ms)} ms` : 'Not measured');
+  $('rekey-button').disabled = !session || !online || !!requestedSession || !!state.negotiating || pending.has('rekey');
+  $('start-button').disabled = !contact || !online || !!requestedSession || !!state.negotiating || pending.has('connect');
+  $('start-button').firstChild.textContent = trusted ? 'Establish secure session' : 'Verify contact to begin';
+  $('message-input').disabled = !session || !online || !!state.negotiating || pending.has('message');
+  $('send-button').disabled = !session || !online || !!state.negotiating || pending.has('message') || !$('message-input').value.trim();
+  $('message-input').placeholder = session ? `Message ${contact?.name || 'your contact'}…` : 'Establish a session to write a message…';
+  setText('composer-status', session ? 'Encrypted on your local client' : 'No encrypted session');
+  setText('lab-session-status', session ? 'Authenticated session active' : 'No session established');
+  setText('lab-algorithm', session?.algorithm || 'Not established');
+  setText('lab-security-level', session?.security_level ? `NIST level ${session.security_level}` : '—');
+  setText('lab-handshake', session?.handshake_ms != null ? `${formatNumber(session.handshake_ms)} ms` : 'Not measured');
+  setText('selection-reason', session?.reason || 'The policy engine will explain its decision after authenticated negotiation.');
+}
+function renderMessages() {
+  const messages = (state.messages || []).filter((m) => !m.peer || m.peer === selectedPeer);
+  const signature = JSON.stringify(messages);
+  const established = hasSession();
+  $('conversation-empty').hidden = !!messages.length;
+  $('messages').hidden = !messages.length;
+  if (!messages.length && established) {
+    $('conversation-empty').querySelector('h3').textContent = 'A private channel.\nAn open conversation.';
+    $('conversation-empty').querySelector('p').textContent = 'Your authenticated session is ready.\nSend the first encrypted message below.';
+    $('start-button').hidden = true;
+  } else if (!messages.length) {
+    $('conversation-empty').querySelector('h3').replaceChildren(document.createTextNode('Just between'), document.createElement('br'), document.createTextNode('the two of you.'));
+    $('conversation-empty').querySelector('p').replaceChildren(document.createTextNode('Start with a verified identity.'), document.createElement('br'), document.createTextNode('Your local clients handle the encryption.'));
+    $('start-button').hidden = false;
+  }
+  if (signature === messageSignature) return;
+  messageSignature = signature;
+  const scroll = $('message-scroll');
+  const nearEnd = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 150;
+  const list = $('messages');
+  list.replaceChildren();
+  for (const message of messages) {
+    const sent = message.direction === 'sent';
+    const item = node('li', 'message ' + (sent ? 'sent' : 'received'));
+    item.append(node('div', 'message-content', message.text));
+    const meta = node('span', 'message-meta');
+    meta.append(node('span', '', `${sent ? 'You' : selectedPeer || 'Contact'}, ${formatTime(message.time || message.timestamp)}`));
+    if (sent) meta.append(icon('lock'));
+    item.append(meta);
+    list.append(item);
+  }
+  if (nearEnd || messages.at(-1)?.direction === 'sent') requestAnimationFrame(() => { scroll.scrollTop = scroll.scrollHeight; });
+}
+function renderEvents() {
+  const events = (state.events || []).slice(-80).reverse();
+  const signature = JSON.stringify(events);
+  if (signature === eventSignature) return;
+  eventSignature = signature;
+  const list = $('events-list');
+  list.replaceChildren();
+  if (!events.length) { list.append(node('li', 'empty-table', 'No events recorded yet.')); return; }
+  for (const event of events) {
+    const row = node('li', 'event-row');
+    row.append(node('time', '', formatTime(event.time || event.timestamp)), node('span', 'event-kind', humanLabel(event.kind || event.type || 'Event')), node('span', 'event-detail', typeof event.detail === 'object' ? JSON.stringify(event.detail) : event.detail || event.message || ''));
+    list.append(row);
+  }
+}
+function renderMetrics() {
+  const body = $('metrics-body');
+  const measurements = { ...(state.metrics || {}) };
+  if (state.session) for (const key of ['encryption_us', 'decryption_us', 'send_count', 'receive_count']) if (state.session[key] != null) measurements[key] = state.session[key];
+  const algorithm = (state.algorithms || []).find((item) => item.name === state.session?.algorithm);
+  if (algorithm) for (const key of ['public_key_bytes', 'ciphertext_bytes']) measurements[key] = algorithm[key];
+  const rows = Object.entries(measurements).filter(([, v]) => v != null);
+  body.replaceChildren();
+  if (!rows.length) { const row = node('tr'); const cell = node('td', 'empty-table', 'Measurements appear after a session runs.'); cell.colSpan = 2; row.append(cell); body.append(row); return; }
+  for (const [key, value] of rows) {
+    const row = node('tr');
+    row.append(node('td', '', humanLabel(key)), node('td', '', typeof value === 'object' ? JSON.stringify(value) : formatNumber(value, 3)));
+    body.append(row);
+  }
+}
+function render() {
+  if (requestedSession) {
+    if (state.session?.session_id === requestedSession.id && state.session.peer === requestedSession.peer) {
+      notify(requestedSession.operation === 'rekey' ? 'Session keys renewed through authenticated negotiation.' : 'Authenticated session established.', true);
+      requestedSession = null;
+    } else if ((!state.negotiating && Date.now() - requestedSession.started > 1500) || Date.now() - requestedSession.started > 20000) {
+      notify('The authenticated handshake did not complete. Check the security event history, then retry.');
+      requestedSession = null;
+    }
+  }
+  renderContacts(); renderStatus(); renderMessages(); renderEvents(); renderMetrics();
+}
+async function refresh() {
+  if (refreshing) return;
+  refreshing = true;
+  try {
+    state = await request('/api/state');
+    $('connection-warning').hidden = true;
+    render();
+  } catch {
+    $('connection-warning').hidden = false;
+    $('message-input').disabled = true;
+    $('send-button').disabled = true;
+    $('start-button').disabled = true;
+    setText('detail-relay', 'Local client unavailable');
+  } finally { refreshing = false; }
+}
+function route() {
+  const route = location.hash.slice(1);
+  const lab = ['overview', 'attacks', 'benchmarks'].includes(route);
+  $('messages-view').hidden = lab;
+  $('lab-view').hidden = !lab;
+  document.querySelectorAll('[data-view]').forEach((link) => { const active = lab ? link.dataset.view === 'overview' : link.dataset.view === 'messages'; link.classList.toggle('active', active); if (active) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current'); });
+  for (const name of ['overview', 'attacks', 'benchmarks']) $(name + '-section').hidden = route !== name;
+  document.querySelectorAll('[data-lab]').forEach((link) => { const active = link.dataset.lab === route; link.classList.toggle('active', active); if (active) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current'); });
+  if (route === 'benchmarks') request('/api/benchmarks').then(renderBenchmarks).catch((error) => notify(error.message));
+}
+function openVerification() {
+  const contact = peer();
+  if (!contact) return;
+  setText('verify-self-name', state.identity?.name);
+  setText('self-fingerprint', state.identity?.fingerprint);
+  setText('verify-peer-name', contact.name);
+  setText('peer-fingerprint', contact.fingerprint || 'Fingerprint unavailable. Start the peer client.');
+  $('trusted-fingerprint').value = '';
+  $('verify-error').hidden = true;
+  $('verify-dialog').showModal();
+}
+function renderAttack(result) {
+  const output = $('attack-result');
+  output.replaceChildren(icon('shield'));
+  const blocked = result.blocked ?? result.rejected ?? result.passed;
+  output.append(node('h3', '', blocked === true ? 'Attack rejected.' : blocked === false ? 'Attack was not rejected.' : 'Experiment completed.'));
+  output.append(node('p', '', result.reason || result.detail || result.message || 'Inspect the recorded outcome below.'));
+  const code = node('code', 'result-code', JSON.stringify(result, null, 2));
+  output.append(code);
+}
+function renderReport(report) {
+  const output = $('test-report');
+  output.replaceChildren();
+  const tests = report.tests || report.results;
+  if (!Array.isArray(tests)) { output.append(node('pre', 'json-output', JSON.stringify(report, null, 2))); return; }
+  const table = node('table', 'data-table');
+  const head = node('thead'); const hr = node('tr');
+  for (const title of ['Test', 'Expected', 'Observed', 'Outcome']) { const th = node('th', '', title); th.scope = 'col'; hr.append(th); }
+  head.append(hr); table.append(head);
+  const body = node('tbody');
+  for (const test of tests) {
+    const row = node('tr');
+    for (const value of [test.name || test.test || test.nodeid, test.expected || 'See test assertion', test.observed || test.detail || 'See runner output', test.status || test.outcome || 'Unknown']) row.append(node('td', '', value));
+    body.append(row);
+  }
+  table.append(body); output.append(table);
+}
+function renderBenchmarks(data) {
+  if (!data || !Object.keys(data).length || data.status === 'not_run') return;
+  const output = $('benchmark-output');
+  output.replaceChildren();
+  const results = Array.isArray(data) ? data : data.algorithms || data.results || data.benchmarks;
+  if (!Array.isArray(results) && (typeof results !== 'object' || !results)) { output.append(node('pre', 'json-output', JSON.stringify(data, null, 2))); return; }
+  const entries = Array.isArray(results) ? results.map((r) => [r.algorithm || r.name || 'Algorithm', r]) : Object.entries(results);
+  const wrap = node('div', 'benchmark-table-wrap');
+  const table = node('table', 'data-table'); const head = node('thead'); const hr = node('tr');
+  for (const title of ['Algorithm', 'Status', 'Keygen mean', 'Encapsulation mean', 'Decapsulation mean', 'Public key', 'Ciphertext']) { const th = node('th', '', title); th.scope = 'col'; hr.append(th); }
+  head.append(hr); table.append(head); const body = node('tbody');
+  const chartValues = [];
+  const ms = (entry, key) => {
+    const aliases = { keygen: 'keygen_ms', encapsulation: 'encapsulate_ms', decapsulation: 'decapsulate_ms' };
+    const source = entry.statistics?.[aliases[key]] || entry[key] || entry[key + '_ms'] || entry[key + '_ns'];
+    const value = typeof source === 'object' ? source?.mean ?? source?.mean_ms ?? source?.mean_ns : source;
+    if (typeof value !== 'number') return null;
+    return entry[key + '_ns'] || source?.mean_ns != null ? value / 1e6 : value;
+  };
+  for (const [name, entry] of entries) {
+    const row = node('tr');
+    const unavailable = entry.available === false || entry.status === 'unavailable' || entry.error;
+    const values = ['keygen', 'encapsulation', 'decapsulation'].map((key) => ms(entry, key));
+    const fields = [name, unavailable ? entry.reason || entry.error || 'Unavailable' : entry.status || 'Measured', ...values.map((v) => v == null ? 'Not measured' : formatNumber(v, 4) + ' ms'), entry.public_key_size || entry.public_key_bytes, entry.ciphertext_size || entry.ciphertext_bytes];
+    for (const [i, value] of fields.entries()) row.append(node('td', '', i > 4 && value != null ? `${formatNumber(value, 0)} B` : value ?? 'Not measured'));
+    body.append(row);
+    if (values[1] != null && !unavailable) chartValues.push({ name, value: values[1] });
+  }
+  table.append(body); wrap.append(table); output.append(wrap);
+  if (chartValues.length) {
+    const chart = node('div', 'benchmark-chart'); chart.append(node('h3', '', 'Mean encapsulation latency'));
+    const max = Math.max(...chartValues.map((r) => r.value), 0.00001);
+    for (const result of chartValues) {
+      const row = node('div', 'chart-row'); row.append(node('span', '', result.name));
+      const track = node('div', 'chart-track'); const bar = node('div', 'chart-bar'); bar.style.width = (result.value / max * 100) + '%'; track.append(bar);
+      row.append(track, node('span', 'chart-value', `${formatNumber(result.value, 4)} ms`)); chart.append(row);
+    }
+    output.append(chart);
+  }
+  const meta = node('div', 'benchmark-meta');
+  for (const [key, value] of Object.entries(data.environment || data.metadata || {})) meta.append(node('span', '', `${humanLabel(key)}: ${typeof value === 'object' ? JSON.stringify(value) : value}`));
+  output.append(meta);
+  const details = node('details'); details.append(node('summary', 'button button-quiet', 'Inspect complete benchmark data'), node('pre', 'json-output', JSON.stringify(data, null, 2))); output.append(details);
+}
+
+$('verify-button').addEventListener('click', openVerification);
+$('start-button').addEventListener('click', () => {
+  if (!peer()?.verified) { openVerification(); return; }
+  const intendedPeer = selectedPeer;
+  action('connect', $('start-button'), async () => { const result = await request('/api/connect', { peer: intendedPeer });
+    requestedSession = { id: result.session_id, peer: intendedPeer, operation: 'connect', started: Date.now() };
+    notify('Authenticated handshake requested. Waiting for peer confirmation.', true); });
+});
+$('close-verify').addEventListener('click', () => $('verify-dialog').close());
+$('verify-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await action('trust', $('trust-submit'), async () => {
+    try {
+      await request('/api/trust', { peer: selectedPeer, fingerprint: $('trusted-fingerprint').value.trim() });
+      $('verify-dialog').close(); notify('Contact fingerprint verified. You can now establish a session.', true);
+    } catch (error) { setText('verify-error', error.message); $('verify-error').hidden = false; throw error; }
+  });
+});
+$('copy-fingerprint').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(state.identity.fingerprint); notify('Your identity fingerprint was copied.', true); }
+  catch { notify('Clipboard is unavailable. Select and copy the fingerprint above.'); }
+});
+$('message-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const text = $('message-input').value.trim();
+  if (!text || !hasSession()) return;
+  const binding = { peer: selectedPeer, session_id: state.session.session_id };
+  action('message', $('send-button'), async () => { await request('/api/message', { text, ...binding }); $('message-input').value = ''; $('message-input').style.height = ''; }).then(() => { if (!$('message-input').disabled) $('message-input').focus(); });
+});
+$('message-input').addEventListener('input', () => { $('message-input').style.height = 'auto'; $('message-input').style.height = Math.min($('message-input').scrollHeight, 140) + 'px'; if (state) renderStatus(); });
+$('message-input').addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('message-form').requestSubmit(); } });
+$('rekey-button').addEventListener('click', () => {
+  const intendedPeer = state?.session?.peer;
+  return action('rekey', $('rekey-button'), async () => {
+    const result = await request('/api/rekey', {});
+    requestedSession = { id: result.session_id, peer: intendedPeer, operation: 'rekey', started: Date.now() };
+    notify('Fresh key negotiation requested. Waiting for peer confirmation.', true);
+  });
+});
+$('attack-scenario').addEventListener('change', () => setText('attack-explanation', descriptions[$('attack-scenario').value]));
+$('attack-form').addEventListener('submit', (event) => { event.preventDefault(); action('attack', $('attack-button'), async () => renderAttack(await request('/api/attack', { scenario: $('attack-scenario').value }))); });
+$('benchmark-button').addEventListener('click', () => action('benchmark', $('benchmark-button'), async () => { setText('benchmark-button', 'Measuring…'); renderBenchmarks(await request('/api/benchmark', { trials: 10 })); setText('benchmark-button', 'Run 10 trials'); }));
+$('report-button').addEventListener('click', () => action('report', $('report-button'), async () => renderReport(await request('/api/report'))));
+$('dismiss-notice').addEventListener('click', () => { $('notice').hidden = true; });
+window.addEventListener('hashchange', route);
+setText('client-endpoint', location.origin);
+route();
+refresh();
+setInterval(refresh, 1500);
