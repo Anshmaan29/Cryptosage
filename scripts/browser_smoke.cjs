@@ -33,7 +33,7 @@ const output = path.resolve(__dirname, '../reports/screenshots');
     await Promise.all([alice.getByRole('button', { name: 'Verify and trust contact' }).click(), bob.getByRole('button', { name: 'Verify and trust contact' }).click()]);
     await Promise.all([alice.waitForFunction(() => !document.querySelector('#verify-dialog').open), bob.waitForFunction(() => !document.querySelector('#verify-dialog').open)]);
     await alice.waitForFunction(() => document.querySelector('#start-button').textContent.includes('Establish secure session'));
-    if (await alice.locator('#message-input').isDisabled()) await alice.locator('#start-button').click();
+    if (await alice.locator('#message-input').isDisabled()) { const reconnect = alice.locator('#reconnect-button'); await (await reconnect.isVisible() ? reconnect : alice.locator('#start-button')).click(); }
     await Promise.all([alice.waitForFunction(() => !document.querySelector('#message-input').disabled), bob.waitForFunction(() => !document.querySelector('#message-input').disabled)]);
     const firstMessage = `A verified channel, experiment ${Date.now()}.`;
     await alice.getByLabel('Message', { exact: true }).fill(firstMessage);

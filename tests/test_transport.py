@@ -213,3 +213,30 @@ def test_delivery_receipt_rejects_forgery_and_wrong_packet(peers):
     receipt["confirmation"] = "forged"
     with pytest.raises(ValueError):
         expectation.verify(receipt)
+
+
+async def test_unconfirmed_delivery_timeout_closes_session(tmp_path):
+    import time
+
+    async with clients(tmp_path) as (a, b, relay, port):
+        await establish(a, b)
+        session = a.peer.session
+        packet = session.seal("Unconfirmed message")
+        message = {
+            "id": "timeout-test",
+            "direction": "sent",
+            "text": "Unconfirmed message",
+            "time": "2026-01-01T00:00:00Z",
+            "peer": "Bob",
+            "status": "sent",
+        }
+        a.messages.append(message)
+        a.outbox[(packet["sid"], packet["counter"])] = {
+            "message": message,
+            "started": time.monotonic() - 31,
+            "expectation": session.receipt_expectation(packet),
+        }
+        state = a.state()
+        assert state["session"] is None
+        assert state["messages"][-1]["status"] == "failed"
+        assert "receipt" in state["messages"][-1]["error"]

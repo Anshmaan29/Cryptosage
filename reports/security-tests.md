@@ -1,8 +1,8 @@
 # Automated security and functional evaluation
 
-Generated: 2026-11-07T21:58:39.379872+00:00
+Generated: 2026-11-07T22:02:38.322658+00:00
 
-passed: 233; failed: 0; error: 0; skipped: 0; xfailed: 0. Runner exit: 0. Complete: True.
+passed: 234; failed: 0; error: 0; skipped: 0; xfailed: 0. Runner exit: 0. Complete: True.
 
 Recorded runner outcomes apply to the tested revision. Passing tests do not constitute formal protocol verification or production certification.
 
@@ -138,6 +138,7 @@ Recorded runner outcomes apply to the tested revision. Passing tests do not cons
 | tests.test_transport.test_malformed_relay_registration_closes_cleanly[hello4] | malformed relay registration closes cleanly[hello4] | Test assertions completed without a reported failure. | PASSED |
 | tests.test_transport.test_delivery_receipt_and_encrypted_history_survive_restart | delivery receipt and encrypted history survive restart | Test assertions completed without a reported failure. | PASSED |
 | tests.test_transport.test_delivery_receipt_rejects_forgery_and_wrong_packet | delivery receipt rejects forgery and wrong packet | Test assertions completed without a reported failure. | PASSED |
+| tests.test_transport.test_unconfirmed_delivery_timeout_closes_session | unconfirmed delivery timeout closes session | Test assertions completed without a reported failure. | PASSED |
 | tests.test_v2_attacks.test_v2_catalog_exercises_real_rejection_or_secure_abort[downgrade] | v2 catalog exercises real rejection or secure abort[downgrade] | Test assertions completed without a reported failure. | PASSED |
 | tests.test_v2_attacks.test_v2_catalog_exercises_real_rejection_or_secure_abort[modified_offers] | v2 catalog exercises real rejection or secure abort[modified offers] | Test assertions completed without a reported failure. | PASSED |
 | tests.test_v2_attacks.test_v2_catalog_exercises_real_rejection_or_secure_abort[modified_selected] | v2 catalog exercises real rejection or secure abort[modified selected] | Test assertions completed without a reported failure. | PASSED |

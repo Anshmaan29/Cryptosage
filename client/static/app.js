@@ -368,6 +368,19 @@ function renderBenchmarks(data) {
     }
     output.append(chart);
   }
+  for (const [metric, title, unit] of [
+    ['handshake_ms','Handshake computation','ms'], ['network_handshake_ms','Loopback handshake','ms'],
+    ['cpu_usage_percent','Process CPU utilization','%'], ['peak_rss_bytes','Sampled process memory','bytes'],
+    ['handshake_bytes','Handshake bandwidth','bytes'], ['encrypt_ms','Message encryption','ms'],
+    ['decrypt_ms','Message decryption','ms'], ['rekey_ms','Fresh session re-key','ms']
+  ]) {
+    const rows = results.map(entry => ({name:entry.name, value:entry.statistics?.[metric]?.mean})).filter(row => typeof row.value === 'number' && Number.isFinite(row.value));
+    if (!rows.length) continue;
+    const chart = node('div','benchmark-chart'); chart.append(node('h3','',title));
+    const maximum = Math.max(...rows.map(row => row.value), 0.00001);
+    for (const row of rows) { const line = node('div','chart-row'); line.append(node('span','',row.name)); const track = node('div','chart-track'); const bar = node('div','chart-bar'); bar.style.width = (row.value / maximum * 100) + '%'; track.append(bar); line.append(track,node('span','chart-value',`${formatNumber(row.value, 3)} ${unit}`)); chart.append(line); }
+    output.append(chart);
+  }
   const meta = node('div', 'benchmark-meta');
   for (const [key, value] of Object.entries(data.environment || data.metadata || {})) meta.append(node('span', '', `${humanLabel(key)}: ${typeof value === 'object' ? JSON.stringify(value) : value}`));
   output.append(meta);
@@ -464,18 +477,44 @@ $('policy-form').addEventListener('submit', (event) => { event.preventDefault();
 $('policy-reset').addEventListener('click', () => { if (!confirm('Restore defaults for future sessions? This may relax your current policy.')) return; action('policy-reset', $('policy-reset'), async () => { await request('/api/policy/reset', {confirm_restrictions:true}); await loadPolicy(); }); });
 $('protocol-refresh').addEventListener('click', refresh);
 function renderV2() {
-  const decision = state.session?.decision;
-  if (decision) $('selection-output').textContent = JSON.stringify(decision, null, 2);
+  const decision = state.session?.decision || state.selection_decision;
+  const decisionOutput = $('selection-output'); decisionOutput.replaceChildren();
+  if (decision) {
+    const steps = node('ol');
+    for (const step of decision.steps || []) { const item = node('li'); item.append(node('strong', '', humanLabel(step.stage) + ': '), node('span', '', step.detail)); steps.append(item); }
+    decisionOutput.append(steps);
+    for (const candidate of decision.candidates || []) { const section = node('section'); section.append(node('h3', '', `${candidate.name} · ${candidate.eligible ? 'Eligible' : 'Excluded'}`)); const checks = node('ul'); for (const check of candidate.checks || []) checks.append(node('li', '', `${check.passed ? 'Pass' : 'Not met'}: ${check.detail}`)); section.append(checks); decisionOutput.append(section); }
+  } else decisionOutput.append(node('p', 'empty-table', 'Run a handshake to inspect the actual policy decision.'));
   const list = $('protocol-events'); list.replaceChildren();
   for (const event of (state.events || []).slice().reverse()) list.append(node('li', '', `${formatTime(event.time)} · ${humanLabel(event.kind)} · ${event.detail}`));
   if (!list.children.length) list.append(node('li', 'empty-table', 'No events recorded yet.'));
   const details = $('encryption-overview'); details.replaceChildren();
   if (state.session) details.append(node('p', '', `Session ${state.session.session_id.slice(0,12)} · ML-DSA-65 · re-key after ${state.session.rekey_interval} messages`));
+  if (location.hash === '#demo') renderDemo();
+}
+function renderDemo() {
+  if (!state) return;
+  const other = location.port === '8001' ? '8002' : location.port === '8002' ? '8001' : null;
+  $('demo-open-peer').hidden = !other;
+  if (other) $('demo-open-peer').href = `${location.protocol}//${location.hostname}:${other}/`;
+  const items = [
+    ['Verify contact fingerprint', '#messages', peer()?.verified ? 'This client has pinned the contact' : 'Verification required'],
+    ['Establish an authenticated session', '#messages', hasSession() ? 'Session established' : 'No active session'],
+    ['Inspect the negotiated selection', '#selection', state.session?.decision ? 'Decision recorded' : 'Establish a session'],
+    ['Exchange encrypted messages', '#messages', state.messages?.length ? 'Local history is available' : 'No messages yet'],
+    ['Inspect actual protocol events', '#protocol', state.events?.length ? 'Events recorded by this client' : 'No events recorded'],
+    ['Run a downgrade experiment', '#attacks', (state.attack_results || []).some(r => r.scenario === 'downgrade') ? 'Experiment recorded in this process' : 'Not yet run'],
+    ['Compare measured performance', '#benchmarks', state.benchmark_completed ? 'Measurements available' : 'Not yet run in this process'],
+    ['Renew session keys', '#messages', 'Use the session details control'],
+    ['Export recorded reports', '#benchmarks', 'Download the available reports']
+  ];
+  const list = $('demo-steps'); list.replaceChildren();
+  for (const [label, href, status] of items) { const li = node('li'); const link = node('a', '', label); link.href = href; li.append(link, node('span', 'muted', ` — ${status}`)); list.append(li); }
 }
 async function loadV2Route(routeName) {
   if (routeName === 'policy') { try { await loadPolicy(); } catch (error) { notify(error.message); } }
   if (routeName === 'attacks') { try { const rows = await request('/api/attacks'); const select = $('attack-scenario'); const current = select.value; select.replaceChildren(); for (const row of rows) { const option = node('option', '', row.name); option.value = row.id; select.append(option); } select.value = current; } catch (error) { notify(error.message); } }
-  if (routeName === 'demo') { const other = location.port === '8001' ? '8002' : location.port === '8002' ? '8001' : null; $('demo-open-peer').hidden = !other; if (other) $('demo-open-peer').href = `${location.protocol}//${location.hostname}:${other}/`; const steps = ['Verify both identities', 'Establish an authenticated session', 'Inspect algorithm selection', 'Exchange messages', 'Inspect protocol events', 'Run a downgrade experiment', 'Compare benchmark results', 'Renew session keys', 'Export reports']; $('demo-steps').replaceChildren(...steps.map((step) => node('li', '', step))); }
+  if (routeName === 'demo') renderDemo();
 }
 window.addEventListener('hashchange', route);
 setText('client-endpoint', location.origin);

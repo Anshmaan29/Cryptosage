@@ -162,6 +162,10 @@ class Client:
                                     entry["message"]["delivered_at"] = now()
                                     self.store.save_history(list(self.messages))
                                     del self.outbox[(packet["sid"], packet["counter"])]
+                                    self.event(
+                                        "delivery",
+                                        "Peer authenticated and saved the encrypted message; delivery receipt verified",
+                                    )
                                     continue
                                 if packet.get("type") == "message":
                                     if not self.peer.session:
@@ -191,9 +195,21 @@ class Client:
                                             self.peer.session.delivery_receipt(packet)
                                         )
                                     )
+                                    self.event(
+                                        "message",
+                                        "Encrypted message authenticated, decrypted and stored locally; receipt sent through relay",
+                                    )
                                 else:
                                     before = self.peer.session
                                     response = self.peer.receive(packet)
+                                    stage = {
+                                        "offer": "Signed peer offer verified; policy checked and KEM ciphertext generated locally",
+                                        "response": "Signed response and negotiated policy verified; KEM secret derived and responder confirmation checked",
+                                        "finish": "Initiator key confirmation verified; responder session established",
+                                        "ack": "Responder final confirmation verified; initiator session established",
+                                    }.get(packet.get("type"))
+                                    if stage:
+                                        self.event("protocol", stage)
                                     if response:
                                         await socket.send(json.dumps(response))
                                     if (
@@ -315,6 +331,10 @@ class Client:
                 await self.socket.send(json.dumps(packet))
                 message["status"] = "sent"
                 self.store.save_history(list(self.messages))
+                self.event(
+                    "message",
+                    "Encrypted message sent to the relay; peer delivery remains unconfirmed",
+                )
             except Exception:
                 self.outbox.pop((packet["sid"], packet["counter"]), None)
                 message["status"] = "failed"
@@ -343,6 +363,15 @@ class Client:
                 "No authenticated delivery receipt arrived in time"
             )
         if expired:
+            if self.peer.session and any(
+                key[0] == self.peer.session.session_id for key in expired
+            ):
+                self.peer.session = None
+                self.ready.clear()
+                self.event(
+                    "timeout",
+                    "Delivery was not confirmed; establish a fresh session before resending",
+                )
             self.store.save_history(list(self.messages))
         if self.peer.expire():
             self.event("timeout", "Handshake expired; reconnect to retry")
@@ -355,6 +384,7 @@ class Client:
             "contacts": self.contacts(),
             "connected": self.connected,
             "negotiating": self.peer.pending is not None,
+            "selection_decision": self.peer.last_decision,
             "session": self.peer.session.public() if self.peer.session else None,
             "messages": list(self.messages),
             "events": list(self.events),
@@ -366,4 +396,6 @@ class Client:
             "algorithms": available_algorithms(),
             "policy": self.peer.policy,
             "benchmark_busy": self.benchmark_busy,
+            "benchmark_completed": self.benchmarks is not None,
+            "attack_results": self.attack_results[-10:],
         }
