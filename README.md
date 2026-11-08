@@ -27,29 +27,28 @@ Use Python 3.12 or newer, Git, and a working C compiler. On macOS, install the X
 From the repository root:
 
 ```sh
-bash scripts/setup_crypto.sh
-.venv/bin/python -m pip install -r requirements.txt
+./scripts/setup.sh
 ```
 
 If `python3` points to an older Python, select the intended interpreter explicitly:
 
 ```sh
-PYTHON=python3.12 bash scripts/setup_crypto.sh
+PYTHON=python3.12 ./scripts/setup.sh
 ```
 
-An exact Python package snapshot from the validated Linux environment is in `requirements-lock.txt` (liboqs bindings are installed separately by `setup_crypto.sh`). Use it after the native setup when reproducing that dependency set.
+The scripts pin the direct Python dependencies, CMake, Ninja, liboqs and its Python bindings. `requirements-lock.txt` records transitive versions for reproduction.
 
 The native library is installed under `.local/`; its pinned official source and build cache are under `.build/`. No system-wide liboqs install is required. The script verifies exact source revisions and exercises real KEM and signature operations. The cryptographic build disables OpenSSL dependency use, so OpenSSL development headers are not a prerequisite.
 
-Linux x86-64 was used for current validation. macOS and Apple Silicon use the same source-build path, but this repository's reports do not establish that they were tested.
+V3 was built and exercised on an Apple M4 running macOS 27.2 with Python 3.14.3. The earlier Linux reports describe earlier revisions. See [the macOS verification record](docs/MACOS-V3.md).
 
 ## Run the demonstration
 
 ```sh
-bash scripts/run_demo.sh
+./scripts/run_demo.sh
 ```
 
-The launcher initializes persistent test identities, starts the relay on port 8765, and starts Alice and Bob on ports 8001 and 8002. Open those two local client ports in your own browser. Keep the terminal running and use Ctrl+C to stop the processes it started.
+The launcher initializes persistent test identities, starts the relay on port 8765, and starts Alice and Bob on ports 8001 and 8002. Open [Alice](http://127.0.0.1:8001) and [Bob](http://127.0.0.1:8002) in your browser. Stop the foreground launcher with Ctrl+C or run `./scripts/stop_demo.sh` in another terminal.
 
 Before the first conversation:
 
@@ -71,12 +70,18 @@ To run components in separate terminals:
 
 Each client can also use an independent `--data-dir`, `--contacts-dir`, and `--policy`. Clients bind only to loopback. Private operations and decrypted messages belong to the local client process, while the relay has routing metadata and ciphertext. The local browser is part of the trusted endpoint.
 
+### Delivery and storage
+
+The message status moves from **Pending** to **Sent to relay** when the relay reports forwarding it. **Delivered** requires an authenticated receipt after the recipient saves the message. An interrupted send or missing receipt may leave delivery unconfirmed. Establish a fresh session with the same verified contact and use **Retry delivery** on the original message.
+
+New macOS profiles use Keychain by default. For existing filesystem-backed profiles, migration is explicit and retains the original key file for recovery. See [Keychain migration and fallback](docs/SECURITY.md#storage-and-endpoint-exposure).
+
 ## Evaluate
 
 ```sh
-.venv/bin/python -m pytest
-.venv/bin/python -m scripts.evaluate
-.venv/bin/python -m scripts.benchmark --trials 30
+./scripts/run_tests.sh
+./scripts/run_benchmarks.sh --trials 100 --profile localhost --output reports/macos-localhost
+./scripts/run_benchmarks.sh --trials 30 --profile constrained --output reports/macos-constrained
 ```
 
 `pytest` executes the implementation's tests. `scripts.evaluate` creates a security report from the current run. `scripts.benchmark` measures both available level-3 KEMs, complete authenticated protocol computation, and separate loopback WebSocket exchanges, then writes real JSON, CSV, and charts. Review the commands' exit status and generated reports; an old report is not evidence that the current run passed.
@@ -109,4 +114,4 @@ Read the [V1 audit and V2 evidence](docs/AUDIT.md), [Architecture and protocol](
 
 ## Scope
 
-The project supports one-to-one text conversations and fresh authenticated sessions. Conversation history and identity files are encrypted at rest using AES-GCM. The default key is protected by local filesystem permissions; an optional passphrase offers stronger protection for copied storage. Live session and ratchet keys remain in memory and are discarded on reconnect. It has no group chat, file transfer, voice/video, multi-device synchronization, production certificate infrastructure, or optional X25519 hybrid mode. The hash ratchet is simpler than Signal's Double Ratchet. Python cannot guarantee erasure of every secret copy, and the default local master key relies on filesystem permissions; copying the entire directory or compromising the same account exposes it.
+The project supports one-to-one text conversations and fresh authenticated sessions. Conversation history and identity files are encrypted at rest using AES-GCM. New macOS profiles keep the storage key in Keychain. Passphrase and filesystem modes are available for fresh profiles. Live session and ratchet keys remain in memory and are discarded on reconnect. It has no group chat, file transfer, voice/video, multi-device synchronization, production certificate infrastructure, or optional X25519 hybrid mode. The hash ratchet is simpler than Signal's Double Ratchet. Python cannot guarantee erasure of every secret copy. Filesystem-backed profiles and retained migration keys require separate protection.

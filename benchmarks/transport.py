@@ -6,8 +6,16 @@ import math
 import socket
 import time
 from websockets.asyncio.client import connect
+from protocol.identity import canonical
 from protocol.session import Peer
 from server.relay import run
+
+
+PROFILES = {
+    "localhost": (0, None),
+    "moderate": (25, None),
+    "constrained": (100, 256_000),
+}
 
 
 def validate_delay(delay_ms):
@@ -22,7 +30,7 @@ def validate_delay(delay_ms):
     return float(delay_ms)
 
 
-async def measure(identity_a, identity_b, policy, delay_ms=0):
+async def measure(identity_a, identity_b, policy, delay_ms=0, *, bandwidth_bps=None):
     """Delay each test endpoint send; actual routing remains a loopback relay.
 
     This models endpoint-injected send delay, not a measured WAN and not a
@@ -35,9 +43,13 @@ async def measure(identity_a, identity_b, policy, delay_ms=0):
     task = asyncio.create_task(run(port=port))
 
     async def send(ws, packet):
-        if delay_ms:
-            await asyncio.sleep(delay_ms / 1000)
-        await ws.send(json.dumps(packet))
+        payload = canonical(packet)
+        pause = delay_ms / 1000
+        if bandwidth_bps is not None:
+            pause += len(payload) * 8 / bandwidth_bps
+        if pause:
+            await asyncio.sleep(pause)
+        await ws.send(payload.decode("ascii"))
 
     async def handshake(a, b, first, second):
         started = time.perf_counter_ns()

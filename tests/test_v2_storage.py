@@ -249,3 +249,112 @@ def test_atomic_write_preserves_existing_file_when_symlink_target_rejected(tmp_p
     with pytest.raises(ValueError, match="symlink"):
         private_write(link, {"original": False})
     assert json.loads(read_private(target)) == {"original": True}
+
+
+def test_keychain_backed_profile_has_no_master_file(tmp_path, monkeypatch):
+    items = {}
+
+    def item(account, *, create=False, migrate=None):
+        if create:
+            items.setdefault(account, b"k" * 32)
+        return items[account]
+
+    monkeypatch.setattr("client.storage.master_key", item)
+    alice = Identity(tmp_path, "Alice", storage_backend="keychain")
+    alice.store.save_history([message()])
+    restarted = Identity(tmp_path, "Alice")
+    assert restarted.storage_protection == "keychain"
+    assert restarted.fingerprint == alice.fingerprint
+    assert restarted.store.load_history() == [message()]
+    assert len(items) == 1
+    assert not (tmp_path / ".keystore/master.key").exists()
+
+
+def test_keychain_denial_fails_closed_even_with_filesystem_env(tmp_path, monkeypatch):
+    def deny(*args, **kwargs):
+        raise ValueError("Keychain access denied")
+
+    monkeypatch.setattr("client.storage.master_key", deny)
+    with pytest.raises(ValueError, match="Keychain access denied"):
+        Identity(tmp_path, "Alice", storage_backend="keychain")
+    with pytest.raises(ValueError, match="Keychain access denied"):
+        Identity(tmp_path, "Alice")
+    assert not (tmp_path / "identity.json").exists()
+    assert not (tmp_path / ".keystore/master.key").exists()
+
+
+def test_keychain_migration_can_resume_and_preserves_ciphertext(tmp_path, monkeypatch):
+    alice = Identity(tmp_path / "Alice", "Alice")
+    bob = Identity(tmp_path / "Bob", "Bob")
+    alice.pin("Bob", bob.public, bob.fingerprint)
+    alice.store.save_history([message()])
+    paths = [
+        alice.directory / name
+        for name in (
+            "identity.json",
+            "history.json",
+            "trust.json",
+            ".keystore/master.key",
+        )
+    ]
+    original = [path.read_bytes() for path in paths]
+    items = {}
+
+    def fail_after_copy(account, *, migrate, **kwargs):
+        items[account] = migrate
+        raise ValueError("Keychain read-back interrupted")
+
+    monkeypatch.setattr("client.storage.master_key", fail_after_copy)
+    with pytest.raises(ValueError, match="read-back interrupted"):
+        alice.store.migrate_to_keychain()
+    assert Identity(alice.directory, "Alice").storage_protection == "filesystem"
+    assert [path.read_bytes() for path in paths] == original
+
+    def resume(account, *, create=False, migrate=None):
+        assert not create
+        key = items[account]
+        if migrate is not None:
+            assert migrate == key
+        return key
+
+    monkeypatch.setattr("client.storage.master_key", resume)
+    alice.store.migrate_to_keychain()
+    restored = Identity(alice.directory, "Alice")
+    assert restored.storage_protection == "keychain"
+    assert restored.fingerprint == alice.fingerprint
+    assert restored.trusted == {"Bob": bob.fingerprint}
+    assert restored.store.load_history() == [message()]
+    assert [path.read_bytes() for path in paths] == original
+
+
+def test_missing_identity_with_existing_history_is_not_replaced(tmp_path):
+    alice = Identity(tmp_path, "Alice")
+    alice.store.save_history([message()])
+    (tmp_path / "identity.json").unlink()
+    with pytest.raises(ValueError, match="Local identity is missing"):
+        Identity(tmp_path, "Alice")
+    assert not (tmp_path / "identity.json").exists()
+    assert alice.store.load_history() == [message()]
+
+
+def test_existing_encrypted_identity_does_not_get_a_replacement_keystore(tmp_path):
+    Identity(tmp_path, "Alice")
+    config = tmp_path / ".keystore/config.json"
+    original = (tmp_path / "identity.json").read_bytes()
+    config.unlink()
+    with pytest.raises(ValueError, match="configuration is missing"):
+        Identity(tmp_path, "Alice")
+    assert not config.exists()
+    assert (tmp_path / "identity.json").read_bytes() == original
+
+
+def test_profile_lock_rejects_second_writer_and_releases_after_exit(tmp_path):
+    from client.storage import private_lock
+
+    lock = tmp_path / ".client.lock"
+    with private_lock(lock, "Profile busy"):
+        with pytest.raises(ValueError, match="Profile busy"):
+            with private_lock(lock, "Profile busy"):
+                pytest.fail("Overlapping writer acquired the lock")
+    with private_lock(lock, "Profile busy"):
+        assert lock.stat().st_mode & 0o077 == 0

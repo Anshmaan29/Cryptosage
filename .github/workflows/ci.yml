@@ -25,7 +25,7 @@ jobs:
       - run: .venv/bin/python -m pip install -r requirements-dev.txt
       - run: .venv/bin/ruff check .
       - run: .venv/bin/ruff format --check .
-      - run: .venv/bin/mypy --ignore-missing-imports scripts/diagnose.py scripts/demo.py client/reports.py
+      - run: .venv/bin/mypy --ignore-missing-imports --exclude 'test_.*\.py$' client protocol server crypto policy attacks benchmarks scripts
       - run: ./scripts/run_tests.sh --cov=crypto --cov=protocol --cov=policy --cov=client --cov=server --cov=attacks --cov-report=term-missing --cov-report=xml:reports/coverage.xml
       - run: ./scripts/run_benchmarks.sh --trials 2 --output reports/ci-benchmarks
       - uses: actions/upload-artifact@v4

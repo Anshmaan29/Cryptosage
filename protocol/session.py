@@ -1,6 +1,7 @@
 """A four-flight, transcript-bound research handshake and ordered hash ratchet."""
 
 from __future__ import annotations
+from cryptography.exceptions import InvalidTag
 import hashlib
 import hmac
 import secrets
@@ -20,9 +21,11 @@ from crypto.primitives import (
 from protocol.identity import Identity, b64, unb64, canonical
 from policy.engine import select
 
-VERSION = "crytosage/1"
+VERSION = "crytosage/2"
 MAX_MESSAGE = 16_384
 REKEY_AFTER = 100
+SESSION_LIFETIME = 3600
+MESSAGE_ID_BYTES = 16
 
 
 def digest(value: dict) -> bytes:
@@ -59,14 +62,18 @@ class Session:
     decision: dict = field(default_factory=dict)
     _issue_receipt_key: bytes = field(default=b"", repr=False)
     _verify_receipt_key: bytes = field(default=b"", repr=False)
+    expires_at: float = field(
+        default_factory=lambda: time.monotonic() + SESSION_LIFETIME
+    )
+    _last_received_hash: bytes = field(default=b"", repr=False)
 
     @classmethod
     def create(
         cls, sid, local, peer, selection, transcript, shared, initiator, elapsed=0
     ):
-        root = hkdf(shared, b"crytosage/1/root", salt=transcript)
-        a = hkdf(root, b"crytosage/1/initiator-chain")
-        b = hkdf(root, b"crytosage/1/responder-chain")
+        root = hkdf(shared, b"crytosage/2/root", salt=transcript)
+        a = hkdf(root, b"crytosage/2/initiator-chain")
+        b = hkdf(root, b"crytosage/2/responder-chain")
         return cls(
             sid,
             local,
@@ -81,19 +88,25 @@ class Session:
             decision=deepcopy(selection.get("decision", {})),
             _issue_receipt_key=hkdf(
                 root,
-                b"crytosage/1/responder-delivery"
+                b"crytosage/2/responder-delivery"
                 if initiator
-                else b"crytosage/1/initiator-delivery",
+                else b"crytosage/2/initiator-delivery",
             ),
             _verify_receipt_key=hkdf(
                 root,
-                b"crytosage/1/initiator-delivery"
+                b"crytosage/2/initiator-delivery"
                 if initiator
-                else b"crytosage/1/responder-delivery",
+                else b"crytosage/2/responder-delivery",
             ),
         )
 
-    def seal(self, text: str) -> dict:
+    def seal(self, text: str, message_id: bytes | None = None) -> dict:
+        if time.monotonic() >= self.expires_at:
+            raise ValueError("Session expired; establish a fresh session")
+        if message_id is None:
+            message_id = secrets.token_bytes(MESSAGE_ID_BYTES)
+        if not isinstance(message_id, bytes) or len(message_id) != MESSAGE_ID_BYTES:
+            raise ValueError("Invalid message identifier")
         if not isinstance(text, str) or not text or len(text.encode()) > MAX_MESSAGE:
             raise ValueError("Message must contain 1–16384 UTF-8 bytes")
         if self.send_count >= self.rekey_interval:
@@ -107,15 +120,20 @@ class Session:
             "to": self.peer,
             "counter": self.send_count,
         }
-        key = hkdf(self._send_chain, b"crytosage/1/message-key")
+        key = hkdf(self._send_chain, b"crytosage/2/message-key")
         nonce = self.send_count.to_bytes(12, "big")
-        ciphertext = encrypt(key, nonce, text.encode(), canonical(header))
-        self._send_chain = hkdf(self._send_chain, b"crytosage/1/next-chain")
+        ciphertext = encrypt(key, nonce, message_id + text.encode(), canonical(header))
+        self._send_chain = hkdf(self._send_chain, b"crytosage/2/next-chain")
         self.send_count += 1
         self.encryption_us = (time.perf_counter_ns() - start) / 1000
         return {**header, "ciphertext": b64(ciphertext)}
 
     def open(self, packet: dict) -> str:
+        return self.open_message(packet)[1]
+
+    def open_message(self, packet: dict) -> tuple[str, str]:
+        if time.monotonic() >= self.expires_at:
+            raise ValueError("Session expired; establish a fresh session")
         start = time.perf_counter_ns()
         expected_keys = {"type", "v", "sid", "from", "to", "counter", "ciphertext"}
         if (
@@ -140,20 +158,26 @@ class Session:
                 "Out-of-order message rejected; reconnect to recover a lost message"
             )
         ciphertext = unb64(packet["ciphertext"])
-        if len(ciphertext) < 17 or len(ciphertext) > MAX_MESSAGE + 16:
+        if (
+            not MESSAGE_ID_BYTES + 17
+            <= len(ciphertext)
+            <= MAX_MESSAGE + MESSAGE_ID_BYTES + 16
+        ):
             raise ValueError("Invalid ciphertext length")
         header = {k: v for k, v in packet.items() if k != "ciphertext"}
-        key = hkdf(self._receive_chain, b"crytosage/1/message-key")
+        key = hkdf(self._receive_chain, b"crytosage/2/message-key")
         try:
             plaintext = decrypt(
                 key, counter.to_bytes(12, "big"), ciphertext, canonical(header)
-            ).decode("utf-8")
-        except Exception as exc:
+            )
+            text = plaintext[MESSAGE_ID_BYTES:].decode("utf-8")
+        except (ValueError, UnicodeDecodeError, InvalidTag) as exc:
             raise ValueError("Ciphertext integrity verification failed") from exc
-        self._receive_chain = hkdf(self._receive_chain, b"crytosage/1/next-chain")
+        self._receive_chain = hkdf(self._receive_chain, b"crytosage/2/next-chain")
         self.receive_count += 1
         self.decryption_us = (time.perf_counter_ns() - start) / 1000
-        return plaintext
+        self._last_received_hash = digest(packet)
+        return plaintext[:MESSAGE_ID_BYTES].hex(), text
 
     def delivery_receipt(self, packet: dict) -> dict:
         if (
@@ -161,7 +185,8 @@ class Session:
             or packet.get("from") != self.peer
             or packet.get("to") != self.local
             or type(packet.get("counter")) is not int
-            or not 0 <= packet["counter"] < self.receive_count
+            or packet["counter"] != self.receive_count - 1
+            or digest(packet) != self._last_received_hash
         ):
             raise ValueError(
                 "Only an authenticated, consumed message can be acknowledged"
@@ -226,8 +251,10 @@ class ReceiptExpectation:
             "counter": self.counter,
             "packet_hash": self.packet_hash,
         }
-        if set(packet) != {*expected, "confirmation"} or any(
-            packet.get(k) != v for k, v in expected.items()
+        if (
+            type(packet.get("counter")) is not int
+            or set(packet) != {*expected, "confirmation"}
+            or any(packet.get(k) != v for k, v in expected.items())
         ):
             raise ValueError("Delivery receipt does not match the sent packet")
         check_mac(self._key, b"delivery", canonical(expected), packet["confirmation"])
@@ -270,15 +297,23 @@ class Peer:
         if body.get("v") != VERSION or body.get("to") != self.identity.name:
             raise ValueError("Unsupported protocol version or recipient")
         public = unb64(body.get("identity", ""))
-        self.identity.check_peer(body.get("from"), public)
+        sender = body.get("from")
+        if not isinstance(sender, str):
+            raise ValueError("Invalid handshake sender")
+        self.identity.check_peer(sender, public)
         if not verify(public, canonical(body), unb64(packet.get("signature", ""))):
             raise ValueError("Invalid negotiation signature")
         sid = body.get("sid")
-        if not isinstance(sid, str) or len(sid) != 64:
+        if (
+            not isinstance(sid, str)
+            or len(sid) != 64
+            or any(c not in "0123456789abcdef" for c in sid)
+        ):
             raise ValueError("Invalid session identifier")
         return body
 
     def initiate(self, peer: str) -> dict:
+        self.expire()
         if self.pending:
             raise ValueError("A handshake is already in progress")
         if peer not in self.identity.trusted:
@@ -379,7 +414,7 @@ class Peer:
                 "ciphertext": b64(ciphertext),
             }
             transcript = digest({"offer": body, "response": response})
-            confirm_key = hkdf(shared, b"crytosage/1/confirmation", salt=transcript)
+            confirm_key = hkdf(shared, b"crytosage/2/confirmation", salt=transcript)
             response["confirmation"] = mac(confirm_key, b"responder", transcript)
             self.pending = {
                 "role": "responder",
@@ -442,7 +477,7 @@ class Peer:
                 p["keys"][selection["algorithm"]][1],
                 unb64(body["ciphertext"]),
             )
-            key = hkdf(shared, b"crytosage/1/confirmation", salt=transcript)
+            key = hkdf(shared, b"crytosage/2/confirmation", salt=transcript)
             check_mac(key, b"responder", transcript, body["confirmation"])
             p.update(
                 transcript=transcript,
@@ -508,8 +543,10 @@ class Peer:
 def complete_handshake(alice: Peer, bob: Peer) -> dict:
     start = time.perf_counter_ns()
     flights = []
-    packet = alice.initiate(bob.identity.name)
+    packet: dict | None = alice.initiate(bob.identity.name)
     for recipient in (bob, alice, bob, alice):
+        if packet is None:
+            raise ValueError("Handshake ended before all flights were exchanged")
         flights.append(packet)
         packet = recipient.receive(packet)
     if not alice.session or not bob.session:

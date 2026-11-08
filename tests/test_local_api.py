@@ -15,7 +15,8 @@ from protocol.identity import Identity, b64
 
 
 @pytest.fixture
-def local_client(tmp_path):
+def local_client(tmp_path, monkeypatch):
+    monkeypatch.setenv("CRYTOSAGE_REPORT_DIR", str(tmp_path / "reports"))
     bob = Identity(tmp_path / "Bob", "Bob")
     contacts = tmp_path / "contacts"
     contacts.mkdir()
@@ -375,3 +376,82 @@ def test_reset_cannot_relax_policy_without_confirmation(local_client):
     )
     assert accepted.status_code == 200
     assert local.peer.policy["minimum_security_level"] == 3
+
+
+def test_chunked_mutation_is_bounded_before_handler(local_client):
+    client, local, _, _ = local_client
+    response = client.post(
+        "/api/message",
+        headers={**auth(client), "Content-Type": "application/json"},
+        content=iter([b"x" * 40_000, b"x" * 40_000]),
+    )
+    assert response.status_code == 413
+    assert not local.messages
+
+
+def test_validation_error_does_not_echo_message_payload(local_client):
+    client, _, _, _ = local_client
+    private = "This text must not appear in validation reports"
+    response = client.post("/api/message", json={"text": private}, headers=auth(client))
+    assert response.status_code == 422
+    assert private not in response.text
+
+
+def test_retry_and_rekey_without_an_authenticated_session(local_client):
+    client, local, _, _ = local_client
+    headers = auth(client)
+    retry = client.post("/api/message/unknown/retry", json={}, headers=headers)
+    rekey = client.post("/api/rekey", json={}, headers=headers)
+    assert retry.status_code == rekey.status_code == 400
+    assert "authenticate" in retry.json()["detail"]
+    assert "No session" in rekey.json()["detail"]
+    assert not local.messages
+
+
+def test_invalid_benchmark_profile_is_rejected(local_client):
+    client, local, _, _ = local_client
+    response = client.post(
+        "/api/benchmark", json={"profile": "wan"}, headers=auth(client)
+    )
+    assert response.status_code == 422
+    assert not local.benchmark_busy
+
+
+def test_security_lab_returns_observed_attack_and_unavailable_report(local_client):
+    client, local, _, _ = local_client
+    assert client.get("/api/attacks").status_code == 200
+    assert client.get("/api/export/security.html").status_code == 404
+    headers = auth(client)
+    invalid = client.post("/api/attack", json={"scenario": "unknown"}, headers=headers)
+    assert invalid.status_code == 400
+    attack = client.post("/api/attack", json={"scenario": "tamper"}, headers=headers)
+    assert attack.status_code == 200
+    assert attack.json()["status"] == "blocked"
+    assert attack.json()["validation"] == "AES-256-GCM authentication"
+    report = client.get("/api/report").json()
+    assert report["test_report_status"] == "not_run"
+    assert report["prototype"] is True and report["attacks"] == local.attack_results
+
+
+def test_benchmark_api_records_and_exports_real_results(local_client):
+    client, local, _, _ = local_client
+    assert client.get("/api/benchmarks").json()["status"] == "not_run"
+    headers = auth(client)
+    conflict = client.post(
+        "/api/benchmark", json={"profile": "localhost", "delay_ms": 4}, headers=headers
+    )
+    assert conflict.status_code == 400 and not local.benchmark_busy
+    result = client.post(
+        "/api/benchmark", json={"profile": "localhost", "trials": 2}, headers=headers
+    )
+    assert result.status_code == 200 and not local.benchmark_busy
+    data = result.json()
+    assert data["metadata"]["configuration"]["network_profile"] == "localhost"
+    assert {item["name"] for item in data["algorithms"]} == {"HQC-3", "ML-KEM-768"}
+    assert all(
+        item["statistics"]["network_handshake_ms"]["n"] == 2
+        for item in data["algorithms"]
+    )
+    assert client.get("/api/benchmarks").json() == data
+    assert client.get("/api/export/benchmarks.json").json() == data
+    assert client.get("/api/export/benchmarks.zip").status_code == 200

@@ -5,8 +5,10 @@
 Run the current suite and generate the current security report from the repository root:
 
 ```sh
-.venv/bin/python -m pytest
-.venv/bin/python -m scripts.evaluate
+.venv/bin/python -m pip install -r requirements-dev.txt
+CRYTOSAGE_REPORT_DIR=reports/macos-v3 ./scripts/run_tests.sh \
+  --cov=crypto --cov=protocol --cov=policy --cov=client --cov=server --cov=attacks \
+  --cov-report=xml:reports/macos-v3/coverage.xml --cov-report=html:reports/macos-v3/coverage-html
 ```
 
 The report records observed runner outcomes. A passing test confirms its stated assertions on that run. Failures, skipped checks, and collection errors must remain visible. Reports from earlier revisions do not establish that a later change passed.
@@ -36,8 +38,12 @@ Supported names are `downgrade`, `identity`, `replay`, `tamper`, and `invalid`. 
 ## Benchmarks
 
 ```sh
-.venv/bin/python -m scripts.benchmark --trials 30
+./scripts/run_benchmarks.sh --trials 100 --profile localhost --output reports/macos-localhost
+./scripts/run_benchmarks.sh --trials 30 --profile moderate --output reports/macos-moderate
+./scripts/run_benchmarks.sh --trials 30 --profile constrained --output reports/macos-constrained
 ```
+
+Profile A adds no delay. Profile B injects 25 ms before each endpoint send. Profile C injects 100 ms before each send and adds payload serialization time at a modeled 256 kb/s. The WebSocket connection stays on localhost throughout. These profiles do not inject packet loss, limit real interface throughput, or change the independent cryptographic-computation timers.
 
 The full-protocol wrapper supplies an adapter that creates independently pinned identities, completes all four handshake flights, sends an authenticated encrypted ping and pong, and measures the real work. A separate per-trial loopback WebSocket relay measures the protocol over real sockets and a fixed opaque transport round trip. Identity creation and relay startup are outside the handshake timing. The lower-level `python -m benchmarks.runner` command measures primitive KEM computation without that adapter and labels full-handshake measurements unavailable.
 

@@ -2,7 +2,7 @@
 
 ## Python, compiler or native library unavailable
 
-Check `python3 --version`, `git --version`, and `cc --version`. Select Python 3.12+ through `PYTHON=python3.12 bash scripts/setup_crypto.sh` when needed. On macOS install the Xcode Command Line Tools; on Linux install your distribution's compiler and Python venv packages.
+Check `python3 --version`, `git --version`, and `cc --version`. Select Python 3.12+ through `PYTHON=python3.12 ./scripts/setup.sh` when needed. On macOS install the Xcode Command Line Tools; on Linux install your distribution's compiler and Python venv packages.
 
 Run the setup script from a terminal and preserve its failing output. It retains TLS verification and checks exact official source revisions. It refuses a changed cryptographic source tree; do not bypass that guard. Preserve local work, then use a clean build-cache directory or restore the intended source before retrying.
 
@@ -24,7 +24,7 @@ Check the contact's own fingerprint through a trusted channel. Do not accept a d
 
 ## Message replay, tampering or out-of-order rejection
 
-The receiver displays no corrupted plaintext and does not advance its chain on an integrity failure. If an authentic next message was merely delayed, it can still be accepted when it arrives. If the relay dropped a message and later counters arrive first, start a new authenticated session. The prototype does not maintain skipped keys or a durable delivery queue.
+The receiver displays no corrupted plaintext and does not advance its chain on an integrity failure. If an authentic next message was merely delayed, it can still be accepted when it arrives. If the relay dropped a message and later counters arrive first, start a new authenticated session. Use **Retry delivery** on an unconfirmed outgoing message. The ratchet keeps no skipped keys or offline delivery queue.
 
 After stopping a client or relay, establish a new session before messaging. The app does not persist ratchet secrets for reuse after process restarts.
 

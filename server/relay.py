@@ -28,7 +28,13 @@ async def run(host: str = "127.0.0.1", port: int = 8765, attack: str | None = No
                 return
             candidate = hello.get("register")
             if (
-                set(hello) != {"register"}
+                (
+                    set(hello) != {"register"}
+                    and (
+                        set(hello) != {"register", "routing_status"}
+                        or hello["routing_status"] is not True
+                    )
+                )
                 or not isinstance(candidate, str)
                 or not candidate.isascii()
                 or not candidate.replace("_", "").replace("-", "").isalnum()
@@ -40,6 +46,23 @@ async def run(host: str = "127.0.0.1", port: int = 8765, attack: str | None = No
             name = candidate
             clients[name] = socket
             await socket.send(json.dumps({"type": "registered", "name": name}))
+
+            async def status(kind, packet):
+                if hello.get("routing_status"):
+                    await socket.send(
+                        json.dumps(
+                            {
+                                "type": kind,
+                                "sid": packet.get("sid"),
+                                "counter": packet.get("counter"),
+                            }
+                        )
+                    )
+                elif kind == "relay_error":
+                    await socket.send(
+                        json.dumps({"type": kind, "detail": "Peer is offline"})
+                    )
+
             async for raw in socket:
                 packet = json.loads(raw)
                 if (
@@ -51,23 +74,29 @@ async def run(host: str = "127.0.0.1", port: int = 8765, attack: str | None = No
                     return
                 destination = clients.get(packet["to"])
                 if destination is None:
-                    await socket.send(
-                        json.dumps({"type": "relay_error", "detail": "Peer is offline"})
-                    )
+                    await status("relay_error", packet)
                     continue
-                if attack and not attack_used:
-                    from attacks.mutations import mutate_packet
+                try:
+                    if attack and not attack_used:
+                        from attacks.mutations import mutate_packet
 
-                    altered = mutate_packet(attack, packet)
-                    if altered != packet or (
-                        attack == "replay" and packet.get("type") == "message"
-                    ):
-                        attack_used = True
-                        await destination.send(json.dumps(altered))
-                        if attack == "replay":
+                        altered = mutate_packet(attack, packet)
+                        if altered != packet or (
+                            attack == "replay" and packet.get("type") == "message"
+                        ):
+                            attack_used = True
                             await destination.send(json.dumps(altered))
-                        continue
-                await destination.send(raw)
+                            if attack == "replay":
+                                await destination.send(json.dumps(altered))
+                        else:
+                            await destination.send(raw)
+                    else:
+                        await destination.send(raw)
+                except ConnectionClosed:
+                    await status("relay_error", packet)
+                else:
+                    if packet.get("type") == "message":
+                        await status("relay_sent", packet)
         except (ConnectionClosed, asyncio.TimeoutError):
             pass
         except (ValueError, TypeError, KeyError):

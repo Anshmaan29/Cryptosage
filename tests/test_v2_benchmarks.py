@@ -108,3 +108,17 @@ def test_report_exports_real_rows_charts_and_standalone_html(tmp_path):
         } <= set(archive.namelist())
         assert all("/" not in name and ".." not in name for name in archive.namelist())
         assert json.loads(archive.read("results.json")) == result
+
+
+def test_named_network_profiles_validate_and_record_constrained_transport():
+    with pytest.raises(ValueError, match="named network profile"):
+        factory(profile="constrained", delay_ms=1)
+    callback, directory = factory(profile="constrained")
+    try:
+        result = callback("ML-KEM-768")
+    finally:
+        directory.cleanup()
+    assert callback.metadata["simulated_bandwidth_bps"] == 256_000
+    assert not callback.metadata["packet_loss_injected"]
+    minimum_ms = 4 * 100 + 8 * result["handshake_bytes"] / 256
+    assert result["network_handshake_ms"] >= minimum_ms

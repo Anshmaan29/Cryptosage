@@ -19,3 +19,11 @@ def test_actual_junit_outcomes_remain_distinct(tmp_path):
         "skipped",
     ]
     assert result["test_report_status"] == "recorded"
+
+
+def test_report_reader_rejects_xml_with_dtd(tmp_path):
+    p = tmp_path / "tests.xml"
+    p.write_text(
+        '<!DOCTYPE testsuite [<!ENTITY payload "untrusted">]><testsuite>&payload;</testsuite>'
+    )
+    assert recorded_results(p) == {"tests": [], "test_report_status": "invalid_report"}

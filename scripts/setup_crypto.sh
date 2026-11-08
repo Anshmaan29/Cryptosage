@@ -11,6 +11,7 @@ export PATH="$ROOT/.venv/bin:$PATH"
 export PIP_CACHE_DIR="$ROOT/.build/pip-cache"
 export OQS_INSTALL_PATH="$ROOT/.local"
 mkdir -p "$ROOT/.build"
+python -m pip install 'pip==26.3'
 python -m pip install 'cmake==4.4.4' 'ninja==1.13.2' 'cryptography==50.0.2'
 
 checkout_release() {

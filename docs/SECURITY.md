@@ -19,11 +19,19 @@ An attacker may control the relay and network traffic, introduce its own identit
 
 ## Storage and endpoint exposure
 
-Identity secrets and conversation history are stored in AES-GCM envelopes. The default random local master key is stored in a mode-0600 file inside a private directory: copying the whole directory or compromising the account exposes it. Setting CRYTOSAGE_STORAGE_PASSWORD before creating identities derives the key with scrypt; keep the password securely and use the same setting on every launch. Existing storage cannot be switched by merely changing this variable. The demonstration's public-contact directory contains public keys only and does not authorize trust automatically.
+Identity secrets, conversation history and duplicate records use AES-256-GCM envelopes. New macOS profiles use the local file-based Keychain through Security.framework. An access denial, missing item or key mismatch stops profile access. Profiles use a private directory and mode-0600 private files. Contact pins persist separately and require the independently verified replacement fingerprint plus explicit confirmation of the previous pin. Keychain reduces exposure from copying the application directory. A compromised account, browser or process that can read the unlocked key or plaintext remains outside this boundary.
 
-The local browser and client process see plaintext. Encrypted conversation history persists locally; session and ratchet chains are not persisted and a new handshake is needed after restart. Secret fields are excluded from public state and the dashboard, but Python immutable byte objects can leave copies in memory. Garbage collection does not provide verifiable secure erasure, and deleting a variable does not prove its bytes were overwritten.
+To migrate an existing filesystem-backed profile, stop the client and securely back up the profile first. Use the command below once per profile.
 
-Keep test identities separate from any real identity. Do not publish `.runtime/`, `.venv/`, `.local/`, or build caches. The Git ignore file excludes these generated directories.
+```sh
+.venv/bin/python -m scripts.init_demo --root .runtime --name Alice --migrate-to-keychain
+```
+
+Migration reads the encrypted identity and history with the existing key, creates or verifies the Keychain item, then atomically changes the backend selector. The identity, history and pin files keep their original bytes. An interruption before the selector changes leaves filesystem mode active and the command can be rerun. The original `.keystore/master.key` remains beside the data for recovery. The copied-directory threat persists while that file is there. After verifying the migrated profile opens and an independent recovery copy is available, move the legacy key to separate protected backup storage if you choose.
+
+For a fresh profile on a Mac without accessible Keychain, set `CRYTOSAGE_STORAGE_PASSWORD` securely before first launch and supply the same password on later launches. This mode derives the key using scrypt. An explicit `CRYTOSAGE_STORAGE_BACKEND=filesystem` is also available for a fresh profile. Its key relies on local permissions and remains readable to an attacker who obtains the entire profile. A failed Keychain profile keeps its configured mode. Use a separate fresh profile for fallback or restore access to the original item.
+
+The local client and browser see plaintext. Live session keys stay in memory. Python cannot guarantee the erasure of immutable secret bytes. Use separate test identities and keep private profiles, keys and build logs out of public bundles.
 
 ## Ratchet guarantees
 
@@ -39,7 +47,7 @@ The symmetric chain has no new entropy between post-quantum re-keys. Compromise 
 - The relay observes metadata, traffic volume, and timing. There is no padding, anonymity, traffic-analysis resistance, or availability protection.
 - The research demo uses loopback HTTP and WebSockets. Deploying it on a public network requires a separate design for transport security, endpoint isolation, authentication, rate limits, and service operations.
 - A trusted peer can initiate costly handshakes, send unexpected traffic, or stop participating. The bounded replay cache and packet sizes do not constitute a complete denial-of-service defense.
-- The ordered ratchet rejects future counters. It has no durable queue, offline delivery, or reliable delivery acknowledgement at the application layer. The UI's sent state means the local client submitted an encrypted packet, not that the peer read it.
+- The ordered ratchet rejects future counters. A dropped packet can require a new session and an explicit retry. Duplicate suppression is bounded to 4,096 distinct received IDs, and can be lost after eviction or rollback. A receipt demonstrates authenticated client storage rather than human readership.
 - Connections may reconnect to the relay, but a new authenticated session is required after a disconnection. Session keys are not saved for reuse after process restarts.
 - Secret identity changes require explicit offline investigation and trust reset. There is no production account recovery, revocation service, or certificate authority.
 

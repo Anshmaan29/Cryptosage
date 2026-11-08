@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 from crypto.primitives import available_algorithms
 
@@ -33,11 +33,11 @@ PREFERENCES = {
 }
 
 
-def _measurement(value: Any) -> bool:
+def _measurement(value: Any) -> TypeGuard[float]:
     return type(value) in (int, float) and 0 <= value <= 1e18 and math.isfinite(value)
 
 
-def validate_policy(policy: dict[str, Any]) -> dict[str, Any]:
+def validate_policy(policy: Any) -> dict[str, Any]:
     if not isinstance(policy, dict):
         raise PolicyError("Policy must be an object")
     level = policy.get("minimum_security_level")
@@ -45,7 +45,10 @@ def validate_policy(policy: dict[str, Any]) -> dict[str, Any]:
         raise PolicyError("Minimum security level must be an integer from 1 to 5")
     if type(policy.get("allow_experimental")) is not bool:
         raise PolicyError("allow_experimental must be a boolean")
-    if policy.get("performance_preference") not in PREFERENCES:
+    if (
+        not isinstance(policy.get("performance_preference"), str)
+        or policy["performance_preference"] not in PREFERENCES
+    ):
         raise PolicyError("Unsupported performance preference")
     interval = policy.get("rekey_interval", 100)
     if type(interval) is not int or not 1 <= interval <= 100:
@@ -56,7 +59,7 @@ def validate_policy(policy: dict[str, Any]) -> dict[str, Any]:
     for name, rule in rules.items():
         if name not in KNOWN or not isinstance(rule, dict):
             raise PolicyError("Unsupported policy algorithm")
-        if rule.get("status") not in {"recommended", "experimental", "prohibited"}:
+        if rule.get("status") not in ("recommended", "experimental", "prohibited"):
             raise PolicyError("Invalid algorithm status")
         priority = rule.get("priority")
         if type(priority) is not int or not 0 <= priority <= 1000:
@@ -235,8 +238,9 @@ def select(
                     else None
                     for snapshot in snapshots
                 ]
-                if all(_measurement(value) for value in values):
-                    combined[metric] = sum(values) / len(values)
+                valid = [value for value in values if _measurement(value)]
+                if len(valid) == len(values):
+                    combined[metric] = sum(valid) / len(valid)
             measurements[name] = combined
     if not isinstance(measurements, dict):
         raise PolicyError("Measured performance profile must be an object", decision)
@@ -251,14 +255,17 @@ def select(
     )
     usable: dict[str, dict[str, float]] = {}
     for metric in metrics:
-        values = {
+        by_algorithm = {
             name: data.get(name, {}).get(metric)
             if isinstance(data.get(name), dict)
             else None
             for name, _, _ in candidates
         }
-        if all(_measurement(value) for value in values.values()):
-            usable[metric] = values
+        comparable = {
+            name: value for name, value in by_algorithm.items() if _measurement(value)
+        }
+        if len(comparable) == len(by_algorithm):
+            usable[metric] = comparable
 
     def score(name: str) -> float:
         return sum(
@@ -266,13 +273,13 @@ def select(
             for values in usable.values()
         )
 
-    chosen, experimental, priority = min(
+    chosen, chosen_experimental, priority = min(
         candidates, key=lambda item: (item[1], item[2], score(item[0]), item[0])
     )
     same_rank = [
         name
         for name, exp, prio in candidates
-        if exp == experimental and prio == priority
+        if exp == chosen_experimental and prio == priority
     ]
     performance_used = bool(usable) and len(same_rank) > 1
     if performance_used:
@@ -289,7 +296,7 @@ def select(
         measured = "no complete comparable measured profile; deterministic name tie-break within equal policy ranks"
     reason = (
         f"{chosen}: both clients permit security level {KNOWN[chosen]} (minimum {minimum}); "
-        f"{'experimental, explicitly allowed by both' if experimental else 'recommended'}; "
+        f"{'experimental, explicitly allowed by both' if chosen_experimental else 'recommended'}; "
         f"combined policy priority {priority}; performance: {measured}."
     )
     decision["performance"] = {

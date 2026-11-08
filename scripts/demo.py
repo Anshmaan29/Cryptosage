@@ -13,33 +13,41 @@ import time
 from pathlib import Path
 from typing import Any
 
+from client.storage import atomic_private_write, private_lock, read_private
+from scripts.diagnose import main as diagnose
+
 ROOT = Path(__file__).resolve().parents[1]
-RECORD = ROOT / ".runtime" / "demo-process.json"
-LOCK = ROOT / ".runtime" / "demo-launch.lock"
+DATA = Path(os.environ.get("CRYTOSAGE_DEMO_ROOT", ROOT / ".runtime")).resolve()
+RECORD = DATA / "demo-process.json"
+LOCK = DATA / "demo-launch.lockfile"
 
 
 def process_fingerprint(pid: int) -> str | None:
     """POSIX ps fields work on Linux and macOS; no process environment is read."""
     result = subprocess.run(
-        ["ps", "-p", str(pid), "-o", "uid=", "-o", "lstart=", "-o", "command="],
+        ["/bin/ps", "-p", str(pid), "-o", "uid=", "-o", "lstart=", "-o", "command="],
         capture_output=True,
         text=True,
         check=False,
     )
-    return " ".join(result.stdout.split()) if result.returncode == 0 else None
+    fingerprint = " ".join(result.stdout.split())
+    if (
+        result.returncode != 0
+        or not fingerprint.startswith(f"{os.getuid()} ")
+        or not fingerprint.endswith(" -m scripts.demo launch")
+    ):
+        return None
+    return fingerprint
 
 
 def read_record() -> dict[str, Any] | None:
-    if not RECORD.exists():
+    if not RECORD.exists() and not RECORD.is_symlink():
         return None
-    if RECORD.is_symlink() or RECORD.stat().st_mode & 0o077:
-        raise ValueError(
-            "Unsafe demo PID record; inspect its ownership and permissions"
-        )
-    value = json.loads(RECORD.read_text())
+    value = json.loads(read_private(RECORD, 4096))
     if (
         not isinstance(value, dict)
         or type(value.get("pid")) is not int
+        or value["pid"] <= 1
         or not isinstance(value.get("fingerprint"), str)
     ):
         raise ValueError("Malformed demo process record; inspect it before removal")
@@ -86,49 +94,67 @@ def check_ports() -> None:
 
 
 def launch() -> int:
-    RECORD.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with private_lock(LOCK, "A demo launcher is already running"):
+        return launch_components()
+
+
+def launch_components() -> int:
     record = read_record()
     if record and recorded_launcher_alive(record):
         raise ValueError(
             "A recorded demo is already running; use ./scripts/stop_demo.sh first"
         )
-    if LOCK.exists():
-        if record is None:
-            raise ValueError(
-                "Demo launch lock exists without a PID record; inspect .runtime before removal"
-            )
-        LOCK.rmdir()
-    LOCK.mkdir(mode=0o700)
     children: list[subprocess.Popen[bytes]] = []
     try:
         check_ports()
+        if diagnose():
+            raise ValueError("Dependency checks failed; run ./scripts/setup.sh")
         fingerprint = process_fingerprint(os.getpid())
         if fingerprint is None:
             raise ValueError("Cannot record launcher identity: ps is unavailable")
-        fd = os.open(RECORD, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as handle:
-            json.dump({"pid": os.getpid(), "fingerprint": fingerprint}, handle)
-        subprocess.run(
-            [sys.executable, "-m", "scripts.init_demo"], cwd=ROOT, check=True
-        )
-        commands = [
-            ["server.relay"],
-            ["client.app", "--name", "Alice", "--port", "8001"],
-            ["client.app", "--name", "Bob", "--port", "8002"],
-        ]
-        for command in commands:
-            children.append(
-                subprocess.Popen([sys.executable, "-m", *command], cwd=ROOT)
-            )
-        print(
-            "Alice port 8001; Bob port 8002; ciphertext relay port 8765. Ctrl-C stops this demo.",
-            flush=True,
+        atomic_private_write(
+            RECORD,
+            json.dumps(
+                {
+                    "pid": os.getpid(),
+                    "fingerprint": fingerprint,
+                }
+            ).encode(),
         )
 
         def shutdown(_signum: int, _frame: Any) -> None:
             raise KeyboardInterrupt
 
         signal.signal(signal.SIGTERM, shutdown)
+        subprocess.run(
+            [sys.executable, "-m", "scripts.init_demo", "--root", str(DATA)],
+            cwd=ROOT,
+            check=True,
+        )
+        commands = [["server.relay"]]
+        for name, port in (("Alice", "8001"), ("Bob", "8002")):
+            commands.append(
+                [
+                    "client.app",
+                    "--name",
+                    name,
+                    "--port",
+                    port,
+                    "--data-dir",
+                    str(DATA / name),
+                    "--contacts-dir",
+                    str(DATA / "contacts"),
+                ]
+            )
+        for command in commands:
+            children.append(
+                subprocess.Popen([sys.executable, "-m", *command], cwd=ROOT)
+            )
+        print(
+            "Alice http://127.0.0.1:8001  Bob http://127.0.0.1:8002\nCtrl-C stops this demo.",
+            flush=True,
+        )
+
         while all(child.poll() is None for child in children):
             time.sleep(0.2)
         print(
@@ -149,7 +175,6 @@ def launch() -> int:
                 child.kill()
                 child.wait()
         RECORD.unlink(missing_ok=True)
-        LOCK.rmdir()
 
 
 def main() -> int:

@@ -25,6 +25,9 @@ def main() -> int:
             errors.append(f"{command} is required for source installation")
     for package in (
         "fastapi",
+        "starlette",
+        "defusedxml",
+        "uvicorn",
         "websockets",
         "cryptography",
         "psutil",

@@ -36,7 +36,7 @@ CATALOG = [
         "id": "modified_selected",
         "name": "Modified selected algorithm",
         "objective": "Make the two clients accept different negotiation outcomes.",
-        "mutation": "The relay changes the selected identifier after the responder signs it.",
+        "mutation": "The controlled responder changes and re-signs the selected KEM, exercising deterministic selection after signature verification.",
     },
     {
         "id": "identity",
@@ -96,9 +96,9 @@ CATALOG = [
 ALL_SCENARIOS = tuple(row["id"] for row in CATALOG)
 _BY_ID = {row["id"]: row for row in CATALOG}
 _EXPECTED = {
-    "downgrade": ("signature", "Policy violation"),
+    "downgrade": ("Invalid negotiation signature",),
     "modified_offers": ("signature",),
-    "modified_selected": ("signature", "Policy violation"),
+    "modified_selected": ("Policy violation: selected algorithm differs",),
     "identity": ("fingerprint",),
     "invalid_signature": ("signature",),
     "tamper": ("integrity",),
@@ -114,8 +114,8 @@ _EXPECTED = {
 def make_pair():
     """Create temporary real identities with explicit, out-of-band test pins."""
     with TemporaryDirectory(prefix="crytosage-lab-") as folder:
-        alice = Identity(Path(folder) / "alice", "Alice")
-        bob = Identity(Path(folder) / "bob", "Bob")
+        alice = Identity(Path(folder) / "alice", "Alice", storage_backend="filesystem")
+        bob = Identity(Path(folder) / "bob", "Bob", storage_backend="filesystem")
         alice.pin("Bob", bob.public, bob.fingerprint)
         bob.pin("Alice", alice.public, alice.fingerprint)
         yield Peer(alice, deepcopy(load_policy())), Peer(bob, deepcopy(load_policy()))
@@ -125,7 +125,13 @@ def _prepare(scenario: str, alice: Peer, bob: Peer) -> Callable[[], object]:
     """Build a real modified packet before the validator-under-test is invoked."""
     if scenario in ("downgrade", "modified_selected"):
         response = bob.receive(alice.initiate("Bob"))
+        if response is None:
+            raise RuntimeError("Baseline handshake produced no response")
         packet = mutate_packet("downgrade", response)
+        if scenario == "modified_selected":
+            packet["signature"] = bob.identity.sign(
+                {k: v for k, v in packet.items() if k != "signature"}
+            )
         return lambda: alice.receive(packet)
     if scenario == "modified_offers":
         packet = mutate_packet("downgrade", alice.initiate("Bob"))
@@ -164,16 +170,19 @@ def _prepare(scenario: str, alice: Peer, bob: Peer) -> Callable[[], object]:
         )
         return lambda: bob.receive(packet)
     complete_handshake(alice, bob)
-    packet = alice.session.seal("A real encrypted lab message")
+    sending, receiving = alice.session, bob.session
+    if sending is None or receiving is None:
+        raise RuntimeError("Baseline handshake produced no session")
+    packet = sending.seal("A real encrypted lab message")
     if scenario == "replay":
-        bob.session.open(packet)
-        return lambda: bob.session.open(packet)
+        receiving.open(packet)
+        return lambda: receiving.open(packet)
     if scenario == "tamper":
         packet = mutate_packet(scenario, packet)
-        return lambda: bob.session.open(packet)
+        return lambda: receiving.open(packet)
     if scenario == "reorder":
-        later = alice.session.seal("This real message must not skip an earlier counter")
-        return lambda: bob.session.open(later)
+        later = sending.seal("This real message must not skip an earlier counter")
+        return lambda: receiving.open(later)
     raise ValueError("Unsupported lab attack scenario")
 
 
@@ -222,10 +231,22 @@ async def _interrupted_rekey(record: Callable[[str, str], None]) -> str:
     with TemporaryDirectory(prefix="crytosage-rekey-lab-") as folder:
         root = Path(folder)
         async with serve(route, "127.0.0.1", 0, max_size=262_144) as relay:
-            port = relay.sockets[0].getsockname()[1]
+            port = next(iter(relay.sockets)).getsockname()[1]
             url = f"ws://127.0.0.1:{port}"
-            alice = Client("Alice", root / "Alice", root / "contacts", url)
-            bob = Client("Bob", root / "Bob", root / "contacts", url)
+            alice = Client(
+                "Alice",
+                root / "Alice",
+                root / "contacts",
+                url,
+                storage_backend="filesystem",
+            )
+            bob = Client(
+                "Bob",
+                root / "Bob",
+                root / "contacts",
+                url,
+                storage_backend="filesystem",
+            )
             alice.identity.pin("Bob", bob.identity.public, bob.identity.fingerprint)
             bob.identity.pin("Alice", alice.identity.public, alice.identity.fingerprint)
             tasks = [asyncio.create_task(client.run()) for client in (alice, bob)]
@@ -240,6 +261,8 @@ async def _interrupted_rekey(record: Callable[[str, str], None]) -> str:
                     "baseline",
                     "Two isolated real Python clients completed a baseline authenticated session over loopback WebSockets.",
                 )
+                if alice.peer.session is None:
+                    raise RuntimeError("Baseline client session is missing")
                 old_sid = alice.peer.session.session_id
                 armed = True
                 record(
@@ -351,6 +374,8 @@ def run_scenario(scenario: str) -> dict:
                     record("accepted", reason)
     except Exception as exc:
         blocked = False
+        if scenario == "rekey_interruption":
+            attempted = any(event["phase"] == "packet_received" for event in timeline)
         status = "infrastructure_error"
         # Setup/transport/assertion failures are not cryptographic rejection and
         # arbitrary exception payloads are deliberately not exported to the UI.
@@ -366,6 +391,20 @@ def run_scenario(scenario: str) -> dict:
         "status": status,
         "reason": reason,
         "security_reason": reason,
+        "validation": {
+            "downgrade": "ML-DSA-65 signature",
+            "modified_offers": "ML-DSA-65 signature",
+            "modified_selected": "Deterministic policy selection",
+            "identity": "Pinned identity fingerprint",
+            "invalid_signature": "ML-DSA-65 signature",
+            "tamper": "AES-256-GCM authentication",
+            "replay": "Consumed receive counter",
+            "handshake_replay": "Handshake replay cache",
+            "unsupported": "KEM capability whitelist",
+            "invalid": "KEM public-key length",
+            "reorder": "Expected receive counter",
+            "rekey_interruption": "Disconnect cleanup and stale-session send guard",
+        }[scenario],
         "protocol_response": reason,
         "elapsed_ms": (time.perf_counter_ns() - start) / 1e6,
         "timeline": timeline,

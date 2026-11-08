@@ -107,9 +107,9 @@ function renderContacts() {
 }
 function renderStatus() {
   const contact = peer();
-  const session = hasSession() ? state.session : null;
+  const online = $('connection-warning').hidden && !!state.connected;
+  const session = online && hasSession() ? state.session : null;
   const trusted = !!contact?.verified;
-  const online = !$('connection-warning').hidden ? false : !!state.connected;
   setText('identity-name', state.identity?.name || 'Local identity');
   setText('identity-avatar', (state.identity?.name || '?').slice(0, 1).toUpperCase());
   setText('peer-name', contact?.name || 'Your next conversation');
@@ -164,7 +164,7 @@ function renderMessages() {
   const retained = new Set();
   let received = 0;
   for (const [index, message] of messages.entries()) {
-    const id = String(message.id || `${message.time}-${index}`);
+    const id = `${message.direction}:${message.id || `${message.time}-${index}`}`;
     retained.add(id);
     const sent = message.direction === 'sent';
     let item = existing.get(id);
@@ -177,7 +177,7 @@ function renderMessages() {
       if (!sent) received++;
     }
     const meta = item.querySelector('.message-meta');
-    const statusSignature = JSON.stringify([message.status, message.error]);
+    const statusSignature = JSON.stringify([message.status, message.error, message.retry_available, message.retry_ready]);
     if (meta.dataset.signature !== statusSignature) {
       meta.dataset.signature = statusSignature;
       meta.replaceChildren();
@@ -185,15 +185,16 @@ function renderMessages() {
       if (message.time) { timestamp.dateTime = message.time; timestamp.title = new Date(message.time).toLocaleString(); }
       meta.append(timestamp);
       if (sent) {
-        const labels = {pending:'Pending',sent:'Sent; awaiting peer receipt',delivered:'Delivered',failed:'Failed'};
+        const labels = {pending:'Pending',sent:'Sent to relay',delivered:'Delivered',unconfirmed:'Delivery unconfirmed',failed:'Failed'};
         const status = node('span', 'delivery-status status-' + (message.status || 'unknown'), labels[message.status] || 'Delivery unconfirmed');
         status.title = message.status === 'delivered' ? 'The peer authenticated and recorded this message. This is not a read receipt.' : message.error || '';
         meta.append(status);
-        if (message.status === 'failed' && message.id) {
-          const retry = node('button', 'retry-button', 'Resend (may duplicate)');
+        if (message.retry_available) {
+          const retry = node('button', 'retry-button', 'Retry delivery');
           retry.type = 'button';
-          retry.title = message.error || 'Resend in a fresh authenticated session; the recipient may already have received the original.';
-          retry.addEventListener('click', () => action('retry-' + id, retry, () => request('/api/message/' + encodeURIComponent(id) + '/retry', {})));
+          retry.disabled = !message.retry_ready;
+          retry.title = message.retry_ready ? 'Encrypt this message again in the fresh session.' : 'Establish a fresh session with this contact to retry.';
+          retry.addEventListener('click', () => action('retry-' + id, retry, () => request('/api/message/' + encodeURIComponent(message.id) + '/retry', {})));
           meta.append(retry);
         }
       }
@@ -299,7 +300,7 @@ function renderAttack(result) {
   output.append(node('h3', '', titles[status] || 'Result inconclusive.'));
   output.append(node('p', '', result.reason || result.detail || 'No protocol outcome was recorded.'));
   const details = node('dl', 'attack-facts');
-  for (const [label,value] of [['Objective',result.objective],['Mutation',result.mutation],['Observed response',result.protocol_response],['Execution time',result.elapsed_ms != null ? formatNumber(result.elapsed_ms,2)+' ms' : null]]) {
+  for (const [label,value] of [['Scope',result.scope],['Objective',result.objective],['Mutation',result.mutation],['Validation under test',result.validation],['Observed response',result.protocol_response],['Execution time',result.elapsed_ms != null ? formatNumber(result.elapsed_ms,2)+' ms' : null]]) {
     if (value) { details.append(node('dt','',label),node('dd','',typeof value === 'object' ? JSON.stringify(value) : value)); }
   }
   output.append(details);
@@ -332,6 +333,15 @@ function renderBenchmarks(data) {
   if (!data || !Object.keys(data).length || data.status === 'not_run') return;
   const output = $('benchmark-output');
   output.replaceChildren();
+  const config = data.metadata?.configuration;
+  if (config?.network_enabled) {
+    const profile = config.network_profile || 'custom';
+    const delay = config.injected_send_delay_ms || 0;
+    const bandwidth = config.simulated_bandwidth_bps;
+    output.append(node('p', 'benchmark-meta', delay || bandwidth
+      ? `${humanLabel(profile)} · ${delay} ms added per send${bandwidth ? ` · ${bandwidth / 1000} kb/s modeled payload rate` : ''}. Loopback with injected delay.`
+      : 'Localhost · Loopback WebSockets with no injected delay.'));
+  }
   if (typeof rememberBenchmark === 'function') rememberBenchmark(data);
   const results = Array.isArray(data) ? data : data.algorithms || data.results || data.benchmarks;
   if (!Array.isArray(results) && (typeof results !== 'object' || !results)) { output.append(node('pre', 'json-output', JSON.stringify(data, null, 2))); return; }
@@ -374,12 +384,33 @@ function renderBenchmarks(data) {
     ['handshake_bytes','Handshake bandwidth','bytes'], ['encrypt_ms','Message encryption','ms'],
     ['decrypt_ms','Message decryption','ms'], ['rekey_ms','Fresh session re-key','ms']
   ]) {
-    const rows = results.map(entry => ({name:entry.name, value:entry.statistics?.[metric]?.mean})).filter(row => typeof row.value === 'number' && Number.isFinite(row.value));
+    const rows = entries.map(([name, entry]) => ({name, value:entry.statistics?.[metric]?.mean})).filter(row => typeof row.value === 'number' && Number.isFinite(row.value));
     if (!rows.length) continue;
     const chart = node('div','benchmark-chart'); chart.append(node('h3','',title));
     const maximum = Math.max(...rows.map(row => row.value), 0.00001);
     for (const row of rows) { const line = node('div','chart-row'); line.append(node('span','',row.name)); const track = node('div','chart-track'); const bar = node('div','chart-bar'); bar.style.width = (row.value / maximum * 100) + '%'; track.append(bar); line.append(track,node('span','chart-value',`${formatNumber(row.value, 3)} ${unit}`)); chart.append(line); }
     output.append(chart);
+  }
+  const distributions = node('div', 'benchmark-table-wrap');
+  const statsTable = node('table', 'data-table');
+  const statsHead = node('thead'); const statsHeaders = node('tr');
+  for (const label of ['Algorithm', 'Handshake stage', 'Samples', 'Mean', 'Median', 'Std. dev.', 'P95']) {
+    const th = node('th', '', label); th.scope = 'col'; statsHeaders.append(th);
+  }
+  statsHead.append(statsHeaders); statsTable.append(statsHead);
+  const statsBody = node('tbody');
+  for (const [name, entry] of entries) {
+    for (const [key, label] of [['handshake_ms', 'Protocol'], ['network_handshake_ms', 'WebSocket'], ['network_rekey_ms', 'WebSocket re-key']]) {
+      const stats = entry.statistics?.[key];
+      if (!stats) continue;
+      const row = node('tr');
+      for (const value of [name, label, stats.n, ...['mean', 'median', 'stdev', 'p95'].map(metric => `${formatNumber(stats[metric], 3)} ms`)]) row.append(node('td', '', value));
+      statsBody.append(row);
+    }
+  }
+  if (statsBody.children.length) {
+    statsTable.append(statsBody); distributions.append(statsTable);
+    output.append(node('h3', '', 'Handshake latency distribution'), distributions);
   }
   const meta = node('div', 'benchmark-meta');
   for (const [key, value] of Object.entries(data.environment || data.metadata || {})) meta.append(node('span', '', `${humanLabel(key)}: ${typeof value === 'object' ? JSON.stringify(value) : value}`));
@@ -447,8 +478,9 @@ $('contacts-toggle').addEventListener('click', () => { const panel = $('contacts
 $('benchmark-trials').addEventListener('change', () => { $('custom-trials-wrap').hidden = $('benchmark-trials').value !== 'custom'; });
 $('benchmark-button').addEventListener('click', () => action('benchmark', $('benchmark-button'), async () => {
   const trials = Number($('benchmark-trials').value === 'custom' ? $('benchmark-custom').value : $('benchmark-trials').value);
+  $('benchmark-progress').hidden = false;
   setText('benchmark-progress', 'Measuring real operations; please wait…');
-  try { renderBenchmarks(await request('/api/benchmark', {trials, delay_ms:Number($('benchmark-delay').value)})); setText('benchmark-progress', 'Measurements completed.'); }
+  try { renderBenchmarks(await request('/api/benchmark', {trials, profile:$('benchmark-profile').value})); setText('benchmark-progress', 'Measurements completed.'); }
   catch (error) { setText('benchmark-progress', 'Benchmark did not complete.'); throw error; }
 }));
 let loadedPolicy = null;

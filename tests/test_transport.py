@@ -238,5 +238,168 @@ async def test_unconfirmed_delivery_timeout_closes_session(tmp_path):
         }
         state = a.state()
         assert state["session"] is None
-        assert state["messages"][-1]["status"] == "failed"
+        assert state["messages"][-1]["status"] == "unconfirmed"
         assert "receipt" in state["messages"][-1]["error"]
+
+
+async def test_lost_receipt_retry_after_both_clients_restart(tmp_path):
+    import json
+
+    from websockets.asyncio.server import serve
+
+    registered = {}
+    dropped = asyncio.Event()
+    routed = []
+
+    async def route(ws):
+        hello = json.loads(await ws.recv())
+        name = hello["register"]
+        registered[name] = ws
+        await ws.send(json.dumps({"type": "registered", "name": name}))
+        try:
+            async for raw in ws:
+                packet = json.loads(raw)
+                if packet["type"] == "message":
+                    routed.append(packet)
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "relay_sent",
+                                "sid": packet["sid"],
+                                "counter": packet["counter"],
+                            }
+                        )
+                    )
+                if packet["type"] == "delivery" and not dropped.is_set():
+                    dropped.set()
+                    continue
+                await registered[packet["to"]].send(raw)
+        finally:
+            registered.pop(name, None)
+
+    async with serve(route, "127.0.0.1", 0) as relay:
+        port = next(iter(relay.sockets)).getsockname()[1]
+        url = f"ws://127.0.0.1:{port}"
+
+        def restore():
+            return tuple(
+                Client(name, tmp_path / name, tmp_path / "contacts", url)
+                for name in ("Alice", "Bob")
+            )
+
+        a, b = restore()
+        a.identity.pin("Bob", b.identity.public, b.identity.fingerprint)
+        b.identity.pin("Alice", a.identity.public, a.identity.fingerprint)
+        tasks = [asyncio.create_task(c.run()) for c in (a, b)]
+        try:
+            await until(lambda: a.connected and b.connected)
+            await establish(a, b)
+            old = a.peer.session.session_id
+            result = await a.send("Private message with a lost acknowledgement")
+            assert result["status"] == "pending"
+            await asyncio.wait_for(dropped.wait(), 6)
+            await until(lambda: a.messages[0]["status"] == "sent")
+            assert b.messages[0]["id"] == result["id"]
+            with pytest.raises(ValueError, match="Only failed or unconfirmed"):
+                await a.retry(result["id"])
+        finally:
+            for task in tasks:
+                await stop(task)
+
+        a, b = restore()
+        assert a.messages[0]["status"] == "unconfirmed"
+        assert a.peer.session is b.peer.session is None
+        assert len(b.seen_messages) == 1
+        tasks = [asyncio.create_task(c.run()) for c in (a, b)]
+        try:
+            await until(lambda: a.connected and b.connected)
+            await establish(a, b)
+            assert a.peer.session.session_id != old
+            retried = await a.retry(result["id"])
+            assert retried["id"] == result["id"]
+            await until(lambda: a.messages[0]["status"] == "delivered")
+            assert len(a.messages) == len(b.messages) == len(b.seen_messages) == 1
+            assert any(event["kind"] == "duplicate" for event in b.events)
+            assert (
+                len(routed) == 2 and routed[0]["ciphertext"] != routed[1]["ciphertext"]
+            )
+            assert routed[0]["sid"] != routed[1]["sid"]
+            for packet in routed:
+                assert set(packet) == {
+                    "type",
+                    "v",
+                    "sid",
+                    "from",
+                    "to",
+                    "counter",
+                    "ciphertext",
+                }
+                assert result["id"] not in json.dumps(packet)
+                assert a.messages[0]["text"] not in json.dumps(packet)
+            with pytest.raises(ValueError, match="Only failed or unconfirmed"):
+                await a.retry(result["id"])
+        finally:
+            for task in tasks:
+                await stop(task)
+
+
+async def test_simultaneous_sends_have_independent_chains_and_receipts(tmp_path):
+    async with clients(tmp_path) as (a, b, _, _):
+        await establish(a, b)
+        await asyncio.gather(a.send("Alice concurrently"), b.send("Bob concurrently"))
+        await until(
+            lambda: all(
+                len(client.messages) == 2 and not client.outbox for client in (a, b)
+            )
+        )
+        for client, expected in ((a, "Bob concurrently"), (b, "Alice concurrently")):
+            assert (
+                next(m for m in client.messages if m["direction"] == "sent")["status"]
+                == "delivered"
+            )
+            assert (
+                next(m for m in client.messages if m["direction"] == "received")["text"]
+                == expected
+            )
+            assert (
+                client.peer.session.send_count == client.peer.session.receive_count == 1
+            )
+
+
+def test_receipt_only_acknowledges_exact_authenticated_packet(peers):
+    from protocol.session import complete_handshake
+
+    alice, bob = peers
+    complete_handshake(alice, bob)
+    packet = alice.session.seal("Original")
+    bob.session.open(packet)
+    with pytest.raises(ValueError, match="authenticated, consumed"):
+        bob.session.delivery_receipt({**packet, "ciphertext": "different"})
+    receipt = bob.session.delivery_receipt(packet)
+    with pytest.raises(ValueError, match="does not match"):
+        alice.session.receipt_expectation(packet).verify({**receipt, "counter": False})
+
+
+async def test_session_lifetime_expires_without_reusing_a_chain(tmp_path):
+    async with clients(tmp_path) as (a, b, _, _):
+        await establish(a, b)
+        session = a.peer.session
+        session.expires_at = 0
+        with pytest.raises(ValueError, match="Session expired"):
+            session.seal("must reject")
+        with pytest.raises(ValueError, match="Open and authenticate"):
+            await a.send("must reject")
+        await establish(a, b)
+        assert a.peer.session.session_id != session.session_id
+
+
+async def test_real_clients_negotiate_hqc_only_with_both_policies_opted_in(tmp_path):
+    async with clients(tmp_path) as (a, b, _, _):
+        for client in (a, b):
+            client.peer.policy["allow_experimental"] = True
+            client.peer.policy["algorithms"]["ML-KEM-768"]["status"] = "prohibited"
+        await establish(a, b)
+        assert a.peer.session.algorithm == b.peer.session.algorithm == "HQC-3"
+        await a.send("HQC session uses real loopback transport")
+        await until(lambda: a.messages[0]["status"] == "delivered")
+        assert b.messages[0]["text"] == a.messages[0]["text"]

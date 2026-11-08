@@ -26,7 +26,7 @@ The local web adapter checks Host, Origin, Fetch Metadata, and a per-process app
 
 ## Four-flight handshake
 
-Protocol identifier: `crytosage/1`. The initiator generates a fresh random session identifier and nonce plus ephemeral KEM keys for its installed supported algorithms. Canonical JSON uses sorted keys and compact separators; signatures and transcript hashes use these bytes.
+The protocol uses `crytosage/2`. Both clients must use V3 to exchange the revised message format. The initiator generates a fresh random session identifier and nonce plus ephemeral KEM keys for its installed supported algorithms. Canonical JSON uses sorted keys and compact separators; signatures and transcript hashes use these bytes.
 
 ```mermaid
 sequenceDiagram
@@ -49,25 +49,31 @@ sequenceDiagram
 
 The responder signs its complete response, including confirmation. That response contains the hash of the full signed-offer body, binding its identity, policy, capabilities, measurements, and KEM public keys. The transcript hash covers the offer and the response before confirmation/signature fields are attached. Both peers independently recompute the deterministic selection from the authenticated offers.
 
-HKDF-SHA-256 derives a dedicated confirmation key from the KEM shared secret with the transcript hash as salt and the `crytosage/1/confirmation` domain. Separate `responder`, `initiator`, and `ack` MAC labels prevent reflection between flights. The initiator only establishes its session after the final acknowledgement. Pending handshakes expire after 30 seconds.
+HKDF-SHA-256 derives a dedicated confirmation key from the KEM shared secret with the transcript hash as salt and the `crytosage/2/confirmation` domain. Separate `responder`, `initiator`, and `ack` MAC labels prevent reflection between flights. The initiator only establishes its session after the final acknowledgement. Pending handshakes expire after 30 seconds.
 
 Offers have a timestamp freshness window, fresh random session/nonce values, and a bounded short-lived replay cache. Message counters reject duplicate ciphertexts. These mechanisms prevent recorded traffic from becoming an authenticated new session without the corresponding shared-key confirmations. The replay cache is in memory; it is not a permanent log across process restarts.
 
 ## Message ratchet
 
-The shared secret and transcript hash derive a root through the `crytosage/1/root` domain. Separate `initiator-chain` and `responder-chain` domains establish the directional chain keys. For each message:
+The shared secret and transcript hash derive a root through the `crytosage/2/root` domain. Separate `initiator-chain` and `responder-chain` domains establish the directional chain keys. For each message:
 
-1. Derive a 32-byte AES key from the current chain using `crytosage/1/message-key`.
+1. Derive a 32-byte AES key from the current chain using `crytosage/2/message-key`.
 2. Encode the directional message counter as a 12-byte nonce.
-3. Encrypt with AES-256-GCM. Authenticate version, session identifier, sender, recipient, and counter as associated data.
-4. Advance the chain with the separate `crytosage/1/next-chain` domain.
+3. Encrypt the random 16-byte logical message ID followed by UTF-8 text with AES-256-GCM. Authenticate version, session identifier, sender, recipient, and counter as associated data.
+4. Advance the chain with the separate `crytosage/2/next-chain` domain.
 
 Nonce values can repeat across directions because the directional keys differ. Each direction advances its key for every message, and a fresh session changes the transcript and initial chains. A failed decryption does not advance the receiving state or display plaintext.
 
 This implementation accepts the next expected counter only. It rejects duplicates and future counters instead of retaining skipped message keys. A lost message therefore requires a fresh session to recover. It is a deliberately simple ordered channel over WebSockets.
 
+## Delivery and recovery
+
+The sender records an attempt locally before transmission. The relay can report that it forwarded an envelope. That advisory event can set **Sent to relay**. The authenticated peer can issue a receipt only for the exact packet it consumed. The directional receipt MAC covers the session, sender and recipient, counter and packet hash. The recipient sends it after the local history and duplicate record commit.
+
+An interrupted transmission, restart or receipt timeout can leave **Delivery unconfirmed**. The client discards the affected active session and asks the user to establish a fresh one. Retrying reuses the encrypted logical ID and original verified contact in a newly encrypted packet. The receiver keeps up to 4,096 IDs scoped to the pinned contact identity, with content hashes, in the same encrypted atomic record as history. A matching retry gets a new receipt without another message row. Conflicting content for a retained ID is rejected. History shows up to 500 messages. Restoring an old profile backup can roll both records back.
+
 ## Re-keying
 
-A manual **Renew session keys** action starts a new signed post-quantum handshake. Before a direction sends beyond 100 messages, the client performs a fresh handshake and waits for completion. Re-keying creates a new session identifier, ephemeral KEM secret, transcript and chains; it does not migrate algorithms inside the old session.
+A manual **Renew session keys** action starts a new signed post-quantum handshake. Before a direction reaches the negotiated limit of up to 100 messages, the client performs a fresh handshake and waits for completion. Re-keying creates a new session identifier, ephemeral KEM secret, transcript and chains; it does not migrate algorithms inside the old session.
 
-New sessions clear active old ratchet state. There is no delivery queue across a re-key or connection interruption. A simultaneous handshake attempt or an expired handshake needs a retry. These operational limitations are visible to the clients rather than treated as successful delivery.
+A session expires after one hour or is replaced by a fresh handshake. Transport reconnects automatically when the relay returns. The user establishes a fresh authenticated session before sending. Simultaneous handshake attempts or a responder still waiting on an interrupted exchange may require a retry after the 30-second handshake timeout.
