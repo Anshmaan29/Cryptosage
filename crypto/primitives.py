@@ -16,7 +16,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-KEMS = ("ML-KEM-768", "HQC-3")
+KEMS = ("ML-KEM-512", "ML-KEM-768", "ML-KEM-1024", "HQC-1", "HQC-3", "HQC-5")
 SIGNATURE = "ML-DSA-65"
 
 
@@ -69,7 +69,7 @@ def _kem(name: str, secret: bytes | None = None) -> Any:
 
 
 def available_algorithms() -> list[dict[str, Any]]:
-    """Report enabled level-3 algorithms only, using actual library identifiers."""
+    """Report enabled KEMs and their levels from the native library."""
     oqs = _oqs()
     result = []
     for name in KEMS:
@@ -85,10 +85,12 @@ def available_algorithms() -> list[dict[str, Any]]:
                     "secret_key_bytes": d["length_secret_key"],
                     "ciphertext_bytes": d["length_ciphertext"],
                     "shared_secret_bytes": d["length_shared_secret"],
-                    "status": "recommended" if name == "ML-KEM-768" else "experimental",
+                    "status": "experimental"
+                    if name.startswith("HQC-")
+                    else "recommended",
                     "implementation_version": d["version"],
                     "standardization": "FIPS 203"
-                    if name == "ML-KEM-768"
+                    if name.startswith("ML-KEM-")
                     else "Selected for future standardization; 2025-08-22 specification",
                 }
             )

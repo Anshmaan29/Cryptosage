@@ -340,7 +340,9 @@ def test_hqc_handshake_requires_explicit_policy_agility(peers):
     alice, bob = peers
     for peer in (alice, bob):
         peer.policy["allow_experimental"] = True
-        peer.policy["algorithms"]["ML-KEM-768"]["status"] = "prohibited"
+        for name, rule in peer.policy["algorithms"].items():
+            if name != "HQC-3":
+                rule["status"] = "prohibited"
     complete_handshake(alice, bob)
     assert alice.session.algorithm == bob.session.algorithm == "HQC-3"
     assert "experimental" in alice.session.reason

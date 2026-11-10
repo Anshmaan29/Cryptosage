@@ -403,7 +403,9 @@ async def test_real_clients_negotiate_hqc_only_with_both_policies_opted_in(tmp_p
     async with clients(tmp_path) as (a, b, _, _):
         for client in (a, b):
             client.peer.policy["allow_experimental"] = True
-            client.peer.policy["algorithms"]["ML-KEM-768"]["status"] = "prohibited"
+            for name, rule in client.peer.policy["algorithms"].items():
+                if name != "HQC-3":
+                    rule["status"] = "prohibited"
         await establish(a, b)
         assert a.peer.session.algorithm == b.peer.session.algorithm == "HQC-3"
         await a.send("HQC session uses real loopback transport")

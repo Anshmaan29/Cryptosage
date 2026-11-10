@@ -4,6 +4,7 @@ import pytest
 
 from crypto.primitives import (
     CryptoError,
+    KEMS,
     available_algorithms,
     decapsulate,
     decrypt,
@@ -17,7 +18,7 @@ from crypto.primitives import (
 )
 
 
-@pytest.mark.parametrize("name", ["ML-KEM-768", "HQC-3"])
+@pytest.mark.parametrize("name", KEMS)
 def test_kem_roundtrip_and_malformed_sizes(name):
     public, secret = kem_keypair(name)
     ciphertext, shared = encapsulate(name, public)
@@ -39,8 +40,15 @@ def test_unsupported_algorithm_fails_closed():
 
 def test_enabled_algorithms_have_correct_security_and_names():
     algorithms = available_algorithms()
-    assert {a["name"] for a in algorithms} == {"ML-KEM-768", "HQC-3"}
-    assert all(a["security_level"] == 3 for a in algorithms)
+    assert {a["name"] for a in algorithms} == set(KEMS)
+    assert {a["name"]: a["security_level"] for a in algorithms} == {
+        "ML-KEM-512": 1,
+        "ML-KEM-768": 3,
+        "ML-KEM-1024": 5,
+        "HQC-1": 1,
+        "HQC-3": 3,
+        "HQC-5": 5,
+    }
     assert (
         next(a for a in algorithms if a["name"] == "HQC-3")["status"] == "experimental"
     )

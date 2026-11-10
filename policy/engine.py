@@ -23,7 +23,14 @@ class PolicyError(ValueError):
         }
 
 
-KNOWN = {"ML-KEM-768": 3, "HQC-3": 3}
+KNOWN = {
+    "ML-KEM-512": 1,
+    "ML-KEM-768": 3,
+    "ML-KEM-1024": 5,
+    "HQC-1": 1,
+    "HQC-3": 3,
+    "HQC-5": 5,
+}
 PREFERENCES = {
     "latency": ("handshake_ms",),
     "cpu": ("cpu_ms",),
@@ -86,11 +93,19 @@ def _offer(offer: dict[str, Any]) -> tuple[set[str], dict[str, Any]]:
     return set(names), validate_policy(offer.get("policy"))
 
 
+def installed_algorithms() -> dict[str, dict[str, Any]]:
+    installed = {row["name"]: row for row in available_algorithms()}
+    for name, row in installed.items():
+        if KNOWN.get(name) != row["security_level"]:
+            raise PolicyError(f"Unexpected native security level for {name}")
+    return installed
+
+
 def admissible_algorithms(policy: dict) -> list[str]:
     rules = policy["algorithms"]
     return [
         row["name"]
-        for row in available_algorithms()
+        for row in installed_algorithms().values()
         if (rule := rules.get(row["name"])) is not None
         and rule["status"] != "prohibited"
         and row["security_level"] >= policy["minimum_security_level"]
@@ -116,9 +131,7 @@ def select(
     """
     left_names, left = _offer(local_offer)
     right_names, right = _offer(peer_offer)
-    installed = {
-        row["name"]: row for row in available_algorithms() if row.get("available", True)
-    }
+    installed = installed_algorithms()
     minimum = max(left["minimum_security_level"], right["minimum_security_level"])
     interval = min(left.get("rekey_interval", 100), right.get("rekey_interval", 100))
     candidates: list[tuple[str, int, int]] = []
@@ -131,8 +144,7 @@ def select(
             rule is not None and rule["status"] != "prohibited" for rule in rules
         )
         compatible = name in left_names and name in right_names and row is not None
-        actual_level = row.get("security_level", 0) if row else 0
-        level = min(actual_level, KNOWN[name]) if type(actual_level) is int else 0
+        level = row["security_level"] if row else 0
         sufficient = level >= minimum
         experimental = any(rule and rule["status"] == "experimental" for rule in rules)
         experimental |= bool(row and row.get("status") == "experimental")
@@ -236,12 +248,18 @@ def select(
             ]
         )
         raise PolicyError(message, decision)
+    rank = min((experimental, priority) for _, experimental, priority in candidates)
+    ranked = [
+        name
+        for name, experimental, priority in candidates
+        if (experimental, priority) == rank
+    ]
     if measurements is None:
         snapshots = [
             offer.get("measurements", {}) for offer in (local_offer, peer_offer)
         ]
         measurements = {}
-        for name, _, _ in candidates:
+        for name in ranked:
             combined = {}
             for metric in sorted(
                 {metric for values in PREFERENCES.values() for metric in values}
@@ -274,7 +292,7 @@ def select(
             name: data.get(name, {}).get(metric)
             if isinstance(data.get(name), dict)
             else None
-            for name, _, _ in candidates
+            for name in ranked
         }
         comparable = {
             name: value for name, value in by_algorithm.items() if _measurement(value)
@@ -282,42 +300,46 @@ def select(
         if len(comparable) == len(by_algorithm):
             usable[metric] = comparable
 
+    fallback = "static size from library, not a measurement"
+    scores_from = dict(usable)
+    missing = [metric for metric in metrics if metric not in usable]
+    if missing:
+        scores_from["static_size_bytes"] = {
+            name: installed[name]["public_key_bytes"]
+            + installed[name]["ciphertext_bytes"]
+            for name in ranked
+        }
+
     def score(name: str) -> float:
         return sum(
             values[name] / max(max(values.values()), 1e-12)
-            for values in usable.values()
+            for values in scores_from.values()
         )
 
-    chosen, chosen_experimental, priority = min(
-        candidates, key=lambda item: (item[1], item[2], score(item[0]), item[0])
-    )
-    same_rank = [
-        name
-        for name, exp, prio in candidates
-        if exp == chosen_experimental and prio == priority
-    ]
-    performance_used = bool(usable) and len(same_rank) > 1
+    chosen = min(ranked, key=lambda name: (score(name), name))
+    chosen_experimental, priority = rank
+    performance_used = len(ranked) > 1
     if performance_used:
-        measured = (
-            "comparable measured "
-            + ", ".join(usable)
-            + " used among equal policy ranks"
-        )
+        sources = []
+        if usable:
+            sources.append("comparable measured " + ", ".join(usable))
+        if missing:
+            sources.append(fallback + " (missing " + ", ".join(missing) + ")")
+        measured = " and ".join(sources) + " used among equal policy ranks"
     elif len(candidates) == 1:
         measured = "not used: only one eligible candidate"
-    elif usable:
-        measured = "available but policy status/priority determined selection before performance"
     else:
-        measured = "no complete comparable measured profile; deterministic name tie-break within equal policy ranks"
+        measured = "policy status/priority determined selection before performance"
     reason = (
-        f"{chosen}: both clients permit security level {KNOWN[chosen]} (minimum {minimum}); "
+        f"{chosen}: both clients permit security level {installed[chosen]['security_level']} (minimum {minimum}); "
         f"{'experimental, explicitly allowed by both' if chosen_experimental else 'recommended'}; "
         f"combined policy priority {priority}; performance: {measured}."
     )
     decision["performance"] = {
         "metrics": list(usable),
-        "values": usable,
-        "scores": {name: score(name) for name, _, _ in candidates},
+        "values": scores_from,
+        "fallback": fallback if missing and performance_used else None,
+        "scores": {name: score(name) for name in ranked},
         "used_for_tiebreak": performance_used,
         "detail": measured,
     }
@@ -330,7 +352,7 @@ def select(
     )
     return {
         "algorithm": chosen,
-        "security_level": KNOWN[chosen],
+        "security_level": installed[chosen]["security_level"],
         "reason": reason,
         "rekey_interval": interval,
         "decision": decision,

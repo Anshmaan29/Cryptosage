@@ -20,8 +20,12 @@ def safe_defaults() -> dict[str, Any]:
         "performance_preference": "latency",
         "rekey_interval": 100,
         "algorithms": {
+            "ML-KEM-512": {"status": "prohibited", "priority": 1},
             "ML-KEM-768": {"status": "recommended", "priority": 1},
+            "ML-KEM-1024": {"status": "recommended", "priority": 1},
+            "HQC-1": {"status": "prohibited", "priority": 2},
             "HQC-3": {"status": "experimental", "priority": 2},
+            "HQC-5": {"status": "experimental", "priority": 2},
         },
     }
 

@@ -29,10 +29,17 @@ def factory(include_network=True, delay_ms=0, *, profile=None):
 
     def measure(name):
         policy = deepcopy(load_policy())
-        policy["allow_experimental"] = name == "HQC-3"
+        policy["allow_experimental"] = name.startswith("HQC-")
         for algorithm, rule in policy["algorithms"].items():
-            if algorithm != name:
-                rule["status"] = "prohibited"
+            rule["status"] = (
+                "prohibited"
+                if algorithm != name
+                else "experimental"
+                if policy["allow_experimental"]
+                else "recommended"
+            )
+        if name in {"ML-KEM-512", "HQC-1"}:
+            policy["minimum_security_level"] = 1
         a, b = Peer(alice, policy), Peer(bob, deepcopy(policy))
         result = complete_handshake(a, b)
         start = time.perf_counter_ns()

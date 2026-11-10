@@ -37,13 +37,17 @@ def test_decision_reports_actual_eligible_and_restricted_candidates():
         "performance",
         "selection",
     ]
-    assert not trace["performance"]["used_for_tiebreak"]
-    assert "only one eligible" in trace["performance"]["detail"]
+    assert candidates["ML-KEM-1024"]["eligible"]
+    assert trace["performance"]["used_for_tiebreak"]
+    assert (
+        "static size from library, not a measurement" in trace["performance"]["detail"]
+    )
 
 
 def test_rejection_retains_explanation_and_never_relaxes_policy():
     a, b = offer(), offer()
     a["policy"]["minimum_security_level"] = 5
+    b["policy"]["algorithms"]["ML-KEM-1024"]["status"] = "prohibited"
     with pytest.raises(PolicyError) as rejection:
         select(a, b)
     trace = rejection.value.decision
@@ -109,6 +113,7 @@ def test_invalid_intervals_fail_securely(interval):
 def test_measured_tie_break_is_explained_only_when_gates_tie():
     a, b = offer(), offer()
     for side in (a, b):
+        side["algorithms"] = ["ML-KEM-768", "HQC-3"]
         side["policy"]["allow_experimental"] = True
         for rule in side["policy"]["algorithms"].values():
             rule.update(status="experimental", priority=1)
@@ -125,6 +130,7 @@ def test_measured_tie_break_is_explained_only_when_gates_tie():
 def test_performance_does_not_claim_to_override_recommended_status():
     a, b = offer(), offer()
     for side in (a, b):
+        side["algorithms"] = ["ML-KEM-768", "HQC-3"]
         side["policy"]["allow_experimental"] = True
         side["measurements"] = {
             "ML-KEM-768": {"handshake_ms": 100},

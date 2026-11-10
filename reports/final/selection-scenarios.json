@@ -1,0 +1,317 @@
+{
+  "machine": "arm64",
+  "os": "macOS-27.2.1-arm64-arm-64bit-Mach-O",
+  "versions": {
+    "liboqs": "0.16.0",
+    "liboqs_python": "0.16.0.2",
+    "cryptography": "50.0.2",
+    "python": "3.14.3",
+    "signature": "ML-DSA-65",
+    "liboqs_commit": "5a1a854b0dc9f2141bdc771c555ee60c37950183",
+    "liboqs_python_commit": "64c76ad0a80d6c69f2003219eb27b253782a3d68"
+  },
+  "generated_at": "2026-11-10T20:51:25.840364+00:00",
+  "measurement_method": "Median of five direct authenticated handshakes per KEM. No network simulation.",
+  "trials": {
+    "ML-KEM-768": [
+      {
+        "handshake_ms": 1.419542,
+        "handshake_bytes": 19097,
+        "message_roundtrip_ms": 0.107584,
+        "encrypt_ms": 0.039834,
+        "decrypt_ms": 0.018709,
+        "rekey_ms": 1.286833
+      },
+      {
+        "handshake_ms": 0.826083,
+        "handshake_bytes": 19097,
+        "message_roundtrip_ms": 0.054292,
+        "encrypt_ms": 0.013459,
+        "decrypt_ms": 0.011583999999999999,
+        "rekey_ms": 0.740375
+      },
+      {
+        "handshake_ms": 1.0585,
+        "handshake_bytes": 19097,
+        "message_roundtrip_ms": 0.07125,
+        "encrypt_ms": 0.017041,
+        "decrypt_ms": 0.014541,
+        "rekey_ms": 1.113167
+      },
+      {
+        "handshake_ms": 0.948708,
+        "handshake_bytes": 19097,
+        "message_roundtrip_ms": 0.060125,
+        "encrypt_ms": 0.01525,
+        "decrypt_ms": 0.012834,
+        "rekey_ms": 0.7475
+      },
+      {
+        "handshake_ms": 0.814709,
+        "handshake_bytes": 19097,
+        "message_roundtrip_ms": 0.0545,
+        "encrypt_ms": 0.010959,
+        "decrypt_ms": 0.011833,
+        "rekey_ms": 0.933958
+      }
+    ],
+    "ML-KEM-1024": [
+      {
+        "handshake_ms": 0.985708,
+        "handshake_bytes": 20253,
+        "message_roundtrip_ms": 0.049125,
+        "encrypt_ms": 0.010375,
+        "decrypt_ms": 0.010417,
+        "rekey_ms": 0.762042
+      },
+      {
+        "handshake_ms": 0.842625,
+        "handshake_bytes": 20253,
+        "message_roundtrip_ms": 0.047625,
+        "encrypt_ms": 0.009042,
+        "decrypt_ms": 0.009916000000000001,
+        "rekey_ms": 0.863875
+      },
+      {
+        "handshake_ms": 0.924375,
+        "handshake_bytes": 20253,
+        "message_roundtrip_ms": 0.062959,
+        "encrypt_ms": 0.013583,
+        "decrypt_ms": 0.012792,
+        "rekey_ms": 0.878167
+      },
+      {
+        "handshake_ms": 1.022583,
+        "handshake_bytes": 20253,
+        "message_roundtrip_ms": 0.053417,
+        "encrypt_ms": 0.012083,
+        "decrypt_ms": 0.011417,
+        "rekey_ms": 0.834333
+      },
+      {
+        "handshake_ms": 0.831167,
+        "handshake_bytes": 20253,
+        "message_roundtrip_ms": 0.051916,
+        "encrypt_ms": 0.010625,
+        "decrypt_ms": 0.011125,
+        "rekey_ms": 0.833542
+      }
+    ]
+  },
+  "measurements": {
+    "ML-KEM-768": {
+      "handshake_ms": 0.948708,
+      "handshake_bytes": 19097
+    },
+    "ML-KEM-1024": {
+      "handshake_ms": 0.924375,
+      "handshake_bytes": 20253
+    }
+  },
+  "scenarios": [
+    {
+      "scenario": "Default policies",
+      "alice": "Level 3, experimental off, latency. Offered ML-KEM-768, ML-KEM-1024.",
+      "bob": "Level 3, experimental off, latency. Offered ML-KEM-768, ML-KEM-1024.",
+      "eligible": [
+        "ML-KEM-1024",
+        "ML-KEM-768"
+      ],
+      "chosen": "ML-KEM-768",
+      "reason": "ML-KEM-768: both clients permit security level 3 (minimum 3); recommended; combined policy priority 2; performance: static size from library, not a measurement (missing handshake_ms) used among equal policy ranks.",
+      "performance": {
+        "metrics": [],
+        "values": {
+          "static_size_bytes": {
+            "ML-KEM-1024": 3136,
+            "ML-KEM-768": 2272
+          }
+        },
+        "fallback": "static size from library, not a measurement",
+        "scores": {
+          "ML-KEM-1024": 1.0,
+          "ML-KEM-768": 0.7244897959183674
+        },
+        "used_for_tiebreak": true,
+        "detail": "static size from library, not a measurement (missing handshake_ms) used among equal policy ranks"
+      }
+    },
+    {
+      "scenario": "Minimum level 5",
+      "alice": "Level 5, experimental off, latency. Offered ML-KEM-1024.",
+      "bob": "Level 3, experimental off, latency. Offered ML-KEM-768, ML-KEM-1024.",
+      "eligible": [
+        "ML-KEM-1024"
+      ],
+      "chosen": "ML-KEM-1024",
+      "reason": "ML-KEM-1024: both clients permit security level 5 (minimum 5); recommended; combined policy priority 2; performance: not used: only one eligible candidate.",
+      "performance": {
+        "metrics": [],
+        "values": {
+          "static_size_bytes": {
+            "ML-KEM-1024": 3136
+          }
+        },
+        "fallback": null,
+        "scores": {
+          "ML-KEM-1024": 1.0
+        },
+        "used_for_tiebreak": false,
+        "detail": "not used: only one eligible candidate"
+      }
+    },
+    {
+      "scenario": "Only Alice opts in",
+      "alice": "Level 3, experimental on, latency. Offered ML-KEM-768, ML-KEM-1024, HQC-3, HQC-5.",
+      "bob": "Level 3, experimental off, latency. Offered ML-KEM-768, ML-KEM-1024.",
+      "eligible": [
+        "ML-KEM-1024",
+        "ML-KEM-768"
+      ],
+      "chosen": "ML-KEM-768",
+      "reason": "ML-KEM-768: both clients permit security level 3 (minimum 3); recommended; combined policy priority 2; performance: static size from library, not a measurement (missing handshake_ms) used among equal policy ranks.",
+      "performance": {
+        "metrics": [],
+        "values": {
+          "static_size_bytes": {
+            "ML-KEM-1024": 3136,
+            "ML-KEM-768": 2272
+          }
+        },
+        "fallback": "static size from library, not a measurement",
+        "scores": {
+          "ML-KEM-1024": 1.0,
+          "ML-KEM-768": 0.7244897959183674
+        },
+        "used_for_tiebreak": true,
+        "detail": "static size from library, not a measurement (missing handshake_ms) used among equal policy ranks"
+      }
+    },
+    {
+      "scenario": "Both opt in, ML-KEM prohibited",
+      "alice": "Level 3, experimental on, latency. Offered HQC-3, HQC-5.",
+      "bob": "Level 3, experimental on, latency. Offered HQC-3, HQC-5.",
+      "eligible": [
+        "HQC-3",
+        "HQC-5"
+      ],
+      "chosen": "HQC-3",
+      "reason": "HQC-3: both clients permit security level 3 (minimum 3); experimental, explicitly allowed by both; combined policy priority 4; performance: static size from library, not a measurement (missing handshake_ms) used among equal policy ranks.",
+      "performance": {
+        "metrics": [],
+        "values": {
+          "static_size_bytes": {
+            "HQC-3": 13492,
+            "HQC-5": 21658
+          }
+        },
+        "fallback": "static size from library, not a measurement",
+        "scores": {
+          "HQC-3": 0.6229568750577154,
+          "HQC-5": 1.0
+        },
+        "used_for_tiebreak": true,
+        "detail": "static size from library, not a measurement (missing handshake_ms) used among equal policy ranks"
+      }
+    },
+    {
+      "scenario": "Bandwidth and latency with observed measurements",
+      "alice": "Level 3, experimental off, bandwidth. Offered ML-KEM-768, ML-KEM-1024.",
+      "bob": "Level 3, experimental off, latency. Offered ML-KEM-768, ML-KEM-1024.",
+      "eligible": [
+        "ML-KEM-1024",
+        "ML-KEM-768"
+      ],
+      "chosen": "ML-KEM-768",
+      "reason": "ML-KEM-768: both clients permit security level 3 (minimum 3); recommended; combined policy priority 2; performance: comparable measured handshake_bytes, handshake_ms used among equal policy ranks.",
+      "performance": {
+        "metrics": [
+          "handshake_bytes",
+          "handshake_ms"
+        ],
+        "values": {
+          "handshake_bytes": {
+            "ML-KEM-1024": 20253,
+            "ML-KEM-768": 19097
+          },
+          "handshake_ms": {
+            "ML-KEM-1024": 0.924375,
+            "ML-KEM-768": 0.948708
+          }
+        },
+        "fallback": null,
+        "scores": {
+          "ML-KEM-1024": 1.974351433739359,
+          "ML-KEM-768": 1.9429220362415445
+        },
+        "used_for_tiebreak": true,
+        "detail": "comparable measured handshake_bytes, handshake_ms used among equal policy ranks"
+      }
+    },
+    {
+      "scenario": "ML-KEM-512 allowed with level 3 minimum",
+      "alice": "Level 3, experimental off, latency. Offered ML-KEM-768, ML-KEM-1024.",
+      "bob": "Level 3, experimental off, latency. Offered ML-KEM-768, ML-KEM-1024.",
+      "eligible": [
+        "ML-KEM-1024",
+        "ML-KEM-768"
+      ],
+      "chosen": "ML-KEM-768",
+      "reason": "ML-KEM-768: both clients permit security level 3 (minimum 3); recommended; combined policy priority 2; performance: static size from library, not a measurement (missing handshake_ms) used among equal policy ranks.",
+      "performance": {
+        "metrics": [],
+        "values": {
+          "static_size_bytes": {
+            "ML-KEM-1024": 3136,
+            "ML-KEM-768": 2272
+          }
+        },
+        "fallback": "static size from library, not a measurement",
+        "scores": {
+          "ML-KEM-1024": 1.0,
+          "ML-KEM-768": 0.7244897959183674
+        },
+        "used_for_tiebreak": true,
+        "detail": "static size from library, not a measurement (missing handshake_ms) used among equal policy ranks"
+      }
+    },
+    {
+      "scenario": "Incompatible KEM restrictions",
+      "alice": "Level 3, experimental off, latency. Offered ML-KEM-768.",
+      "bob": "Level 3, experimental off, latency. Offered ML-KEM-1024.",
+      "eligible": [],
+      "chosen": null,
+      "reason": "No mutually acceptable secure algorithm: HQC-1: Denied by a local policy or missing policy rule; Not offered by both clients or implementation unavailable; Implementation unavailable or security level below 3; Experimental implementation requires both policies to opt in; HQC-3: Denied by a local policy or missing policy rule; Not offered by both clients or implementation unavailable; Experimental implementation requires both policies to opt in; HQC-5: Denied by a local policy or missing policy rule; Not offered by both clients or implementation unavailable; Experimental implementation requires both policies to opt in; ML-KEM-1024: Denied by a local policy or missing policy rule; Not offered by both clients or implementation unavailable; ML-KEM-512: Denied by a local policy or missing policy rule; Not offered by both clients or implementation unavailable; Implementation unavailable or security level below 3; ML-KEM-768: Denied by a local policy or missing policy rule; Not offered by both clients or implementation unavailable",
+      "performance": {}
+    },
+    {
+      "scenario": "Observed latency among equal-priority ML-KEMs",
+      "alice": "Level 3, experimental off, latency. Offered ML-KEM-768, ML-KEM-1024.",
+      "bob": "Level 3, experimental off, latency. Offered ML-KEM-768, ML-KEM-1024.",
+      "eligible": [
+        "ML-KEM-1024",
+        "ML-KEM-768"
+      ],
+      "chosen": "ML-KEM-1024",
+      "reason": "ML-KEM-1024: both clients permit security level 5 (minimum 3); recommended; combined policy priority 2; performance: comparable measured handshake_ms used among equal policy ranks.",
+      "performance": {
+        "metrics": [
+          "handshake_ms"
+        ],
+        "values": {
+          "handshake_ms": {
+            "ML-KEM-1024": 0.924375,
+            "ML-KEM-768": 0.948708
+          }
+        },
+        "fallback": null,
+        "scores": {
+          "ML-KEM-1024": 0.9743514337393592,
+          "ML-KEM-768": 1.0
+        },
+        "used_for_tiebreak": true,
+        "detail": "comparable measured handshake_ms used among equal policy ranks"
+      }
+    }
+  ]
+}

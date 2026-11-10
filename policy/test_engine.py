@@ -20,15 +20,16 @@ def test_default_selects_recommended_real_implementation():
 def test_prohibition_from_either_endpoint_is_authoritative():
     left, right = offer(), offer()
     right["policy"]["algorithms"]["ML-KEM-768"]["status"] = "prohibited"
-    with pytest.raises(PolicyError, match="No mutually acceptable"):
-        select(left, right)
+    assert select(left, right)["algorithm"] == "ML-KEM-1024"
 
 
 def test_minimum_security_cannot_be_reduced_for_performance():
     left, right = offer(), offer()
     right["policy"]["minimum_security_level"] = 5
-    with pytest.raises(PolicyError):
-        select(left, right, {"ML-KEM-768": {"handshake_ms": 0}})
+    assert (
+        select(left, right, {"ML-KEM-768": {"handshake_ms": 0}})["algorithm"]
+        == "ML-KEM-1024"
+    )
 
 
 def test_experimental_requires_both_opt_ins():
@@ -45,6 +46,7 @@ def test_experimental_requires_both_opt_ins():
 def test_symmetric_signed_measurement_selection():
     left, right = offer(), offer()
     for value in (left, right):
+        value["algorithms"] = ["ML-KEM-768", "HQC-3"]
         value["policy"]["allow_experimental"] = True
         for rule in value["policy"]["algorithms"].values():
             rule.update(status="experimental", priority=1)

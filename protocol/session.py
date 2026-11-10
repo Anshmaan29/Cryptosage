@@ -18,7 +18,7 @@ from crypto.primitives import (
     decrypt,
 )
 from protocol.identity import Identity, b64, unb64, canonical
-from policy.engine import admissible_algorithms, select
+from policy.engine import admissible_algorithms, installed_algorithms, select
 
 VERSION = "crytosage/2"
 MAX_MESSAGE = 16_384
@@ -265,6 +265,7 @@ class Peer:
     def __init__(
         self, identity: Identity, policy: dict, measurements: dict | None = None
     ):
+        installed_algorithms()
         self.identity, self.policy = identity, policy
         self.measurements = measurements or {}
         self.pending: dict | None = None
