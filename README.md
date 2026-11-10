@@ -122,3 +122,7 @@ Read the [V1 audit and V2 evidence](docs/AUDIT.md), [Architecture and protocol](
 The project supports one-to-one text conversations and fresh authenticated sessions. Conversation history and identity files are encrypted at rest using AES-GCM. New macOS profiles keep the storage key in Keychain. Passphrase and filesystem modes are available for fresh profiles. Live session and ratchet keys remain in memory and are discarded on reconnect. It has no group chat, file transfer, voice/video, multi-device synchronization, production certificate infrastructure, or optional X25519 hybrid mode. The hash ratchet is simpler than Signal's Double Ratchet. Python cannot guarantee erasure of every secret copy. Filesystem-backed profiles and retained migration keys require separate protection.
 
 [Two-laptop LAN demo and contact cards](docs/TWO-LAPTOP-DEMO.md)
+
+## Third-party software
+
+Cryptosage uses [liboqs](https://github.com/open-quantum-safe/liboqs), distributed under the MIT License, for post-quantum cryptographic implementations.
