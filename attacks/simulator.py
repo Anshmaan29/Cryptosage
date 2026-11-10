@@ -22,6 +22,12 @@ from attacks.mutations import SCENARIOS, mutate_packet
 # SCENARIOS remains the V1 five-item public compatibility interface.
 CATALOG = [
     {
+        "id": "relay_name_squatting",
+        "name": "Relay name squatting",
+        "objective": "Replace a routing name already registered by its original key.",
+        "mutation": "A second identity signs a registration for the same name with a different key.",
+    },
+    {
         "id": "downgrade",
         "name": "Algorithm downgrade",
         "objective": "Force an unapproved cryptographic choice.",
@@ -309,6 +315,71 @@ async def _interrupted_rekey(record: Callable[[str, str], None]) -> str:
                 await asyncio.gather(*tasks, return_exceptions=True)
 
 
+async def _relay_name_squatting(record: Callable[[str, str], None]) -> str:
+    """Check the real relay's first-seen binding on an ephemeral loopback port."""
+    from websockets.asyncio.client import connect
+    from websockets.exceptions import ConnectionClosed
+    from protocol.registration import register_client
+    from server.relay import run
+
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    with TemporaryDirectory(prefix="crytosage-registration-lab-") as folder:
+        original = Identity(
+            Path(folder) / "original", "Bob", storage_backend="filesystem"
+        )
+        replacement = Identity(
+            Path(folder) / "replacement", "Bob", storage_backend="filesystem"
+        )
+        relay = asyncio.create_task(run(port=port))
+        url = f"ws://127.0.0.1:{port}"
+        try:
+            async with asyncio.timeout(5):
+                while True:
+                    try:
+                        first = await connect(url, proxy=None)
+                        break
+                    except OSError:
+                        if relay.done():
+                            await relay
+                        await asyncio.sleep(0.01)
+            async with first:
+                await register_client(first, original)
+            record(
+                "baseline",
+                "The original identity registered its signed public key on the loopback relay.",
+            )
+            record(
+                "packet_mutated",
+                "A different identity presented its own signed registration for Bob.",
+            )
+            async with connect(url, proxy=None) as second:
+                record(
+                    "packet_received",
+                    "The relay received the second registration for Bob.",
+                )
+                try:
+                    await register_client(second, replacement)
+                except ConnectionClosed as exc:
+                    if (
+                        exc.rcvd is None
+                        or exc.rcvd.reason != "Routing identity key changed"
+                    ):
+                        raise
+                    record(
+                        "validation_failed",
+                        "The relay rejected the changed first-seen public key.",
+                    )
+                    return "Relay rejected the changed routing identity key"
+                raise AssertionError("The relay accepted a replacement key")
+        finally:
+            relay.cancel()
+            await asyncio.gather(relay, return_exceptions=True)
+
+
 def run_scenario(scenario: str) -> dict:
     """Run an isolated experiment; infrastructure failures are never attack success."""
     if scenario not in _BY_ID:
@@ -335,7 +406,16 @@ def run_scenario(scenario: str) -> dict:
         "An isolated experiment was requested; active conversations are not a target.",
     )
     try:
-        if scenario == "rekey_interruption":
+        if scenario == "relay_name_squatting":
+            reason = asyncio.run(_relay_name_squatting(record))
+            attempted = True
+            blocked = True
+            status = "blocked"
+            record(
+                "protected",
+                "The first registered key retained the routing name until relay restart.",
+            )
+        elif scenario == "rekey_interruption":
             attempted = True
             reason = asyncio.run(_interrupted_rekey(record))
             blocked = True
@@ -374,7 +454,7 @@ def run_scenario(scenario: str) -> dict:
                     record("accepted", reason)
     except Exception as exc:
         blocked = False
-        if scenario == "rekey_interruption":
+        if scenario in ("rekey_interruption", "relay_name_squatting"):
             attempted = any(event["phase"] == "packet_received" for event in timeline)
         status = "infrastructure_error"
         # Setup/transport/assertion failures are not cryptographic rejection and
@@ -392,6 +472,7 @@ def run_scenario(scenario: str) -> dict:
         "reason": reason,
         "security_reason": reason,
         "validation": {
+            "relay_name_squatting": "First-seen relay registration key binding",
             "downgrade": "ML-DSA-65 signature",
             "modified_offers": "ML-DSA-65 signature",
             "modified_selected": "Deterministic policy selection",
@@ -409,7 +490,7 @@ def run_scenario(scenario: str) -> dict:
         "elapsed_ms": (time.perf_counter_ns() - start) / 1e6,
         "timeline": timeline,
         "scope": "isolated real local WebSocket clients"
-        if scenario == "rekey_interruption"
+        if scenario in ("rekey_interruption", "relay_name_squatting")
         else "isolated real client/protocol experiment; active conversation unchanged",
     }
 

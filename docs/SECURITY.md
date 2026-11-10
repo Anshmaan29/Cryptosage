@@ -56,3 +56,5 @@ The symmetric chain has no new entropy between post-quantum re-keys. Compromise 
 ## Future work
 
 Useful research extensions include an independently reviewed protocol specification, formal state-machine analysis, tighter native secret handling, continuous native-memory profiling, transport-aware benchmark decomposition, bounded skipped-message handling, independent review of authenticated delivery receipts, and expert review of the hybrid key combiner. These changes require their own security analysis rather than adding feature flags to the current guarantees.
+
+Multiple simultaneous conversations are future work. The current client maintains one active session at a time.
