@@ -6,7 +6,7 @@ Create a private chat and share its invite with one person through a trusted cha
 
 ML-KEM-768 is the default. To test HQC-3, the host must choose it and the guest must explicitly join with the experimental algorithm. Both browsers verify the selected KEM before using it. A signed, authenticated exchange confirms shared keys before enabling the composer. **Delivered** means the recipient browser authenticated the packet and accepted the message in its current room session.
 
-Room history, keys and duplicate records live in browser memory. Reloading ends that endpoint session. When a socket reconnects within the same page, the peer requires a fresh handshake and retains up to 512 duplicate records for the current room. The hosted browser protocol and macOS wire protocol are separate. The macOS edition provides Keychain storage, persistent history and its Security Lab. Use test data in the hosted edition.
+Room history, keys and duplicate records live in browser memory. Reloading ends that endpoint session. When a socket reconnects within the same page, the peer requires a fresh handshake and retains up to 512 duplicate records for the current room. The browser Security Lab displays the active room state and runs isolated tampering, replay and negotiation checks using real browser protocol operations. Its benchmark measures real KEM operations on the current device. The hosted browser protocol and macOS wire protocol are separate. The macOS edition provides Keychain storage, persistent history and the broader native Security Lab. Use test data in the hosted edition.
 
 ## Build and check
 

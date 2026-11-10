@@ -21,6 +21,8 @@ function notify(detail) {
 function status(detail, ready = false) {
   $('state').textContent = ready ? 'Authenticated' : detail;
   $('state').dataset.ready = String(ready);
+  $('lab-state').textContent = ready ? 'Authenticated' : detail;
+  $('lab-kem').textContent = ready ? config.algorithm : 'Not negotiated';
   $('session-description').textContent = detail;
   $('message').disabled = !ready;
   $('send').disabled = !ready || sending;

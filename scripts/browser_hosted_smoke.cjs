@@ -31,6 +31,18 @@ async function exercise(browser, algorithm) {
         assert.equal(await flight.evaluate(el => getComputedStyle(el).animationName), 'none');
       }
     }
+    if (algorithm === 'ML-KEM-768') {
+      await a.getByRole('button', { name: 'Security lab' }).click();
+      for (const scenario of ['tamper', 'replay', 'negotiation']) {
+        await a.locator('#lab-attack').selectOption(scenario);
+        await a.getByRole('button', { name: 'Run isolated experiment' }).click();
+        await a.waitForFunction(() => document.querySelector('#attack-result').textContent.startsWith('Blocked:'));
+      }
+      await a.getByRole('button', { name: 'Run benchmark' }).click();
+      await a.locator('#benchmark-result table').waitFor();
+      assert.match(await a.locator('#benchmark-result').innerText(), /HQC-3/);
+      await a.getByRole('button', { name: 'Messages', exact: true }).click();
+    }
     await a.getByLabel('Key exchange').selectOption(algorithm);
     await a.getByRole('button', { name: 'Create private chat' }).click();
     await a.locator('#invite-link').waitFor({ timeout: 30_000 });

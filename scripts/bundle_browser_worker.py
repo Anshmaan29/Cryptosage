@@ -14,6 +14,7 @@ FILES = {
     "/favicon.svg": ("favicon.svg", "image/svg+xml"),
     "/styles.css": ("styles.css", "text/css; charset=utf-8"),
     "/app.mjs": ("app.mjs", "text/javascript; charset=utf-8"),
+    "/lab.mjs": ("lab.mjs", "text/javascript; charset=utf-8"),
     "/protocol.mjs": ("protocol.mjs", "text/javascript; charset=utf-8"),
     "/crypto.mjs": ("crypto.mjs", "text/javascript; charset=utf-8"),
     "/liboqs.mjs": ("liboqs.mjs", "text/javascript; charset=utf-8"),
@@ -28,6 +29,7 @@ def build() -> None:
         "styles.css",
         "favicon.svg",
         "app.mjs",
+        "lab.mjs",
         "protocol.mjs",
         "crypto.mjs",
     ):

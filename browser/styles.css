@@ -61,3 +61,18 @@ h1,h2{font:400 clamp(1.8rem,4vw,3rem)/1.05 var(--display);letter-spacing:-.03em;
 }
 @keyframes converge{to{transform:translate(var(--x),var(--y)) scale(.68)}}
 @keyframes grow{to{transform:scaleX(1)}}
+.lab{padding-block:clamp(1rem,3vw,2rem) 3rem}
+.lab-heading{display:flex;justify-content:space-between;align-items:start;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem}
+.lab-heading p,.lab-panel p{color:var(--muted);margin-top:.8rem;max-width:65ch}
+.lab-tag{color:var(--lime);font-size:.875rem}
+.lab-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}
+.lab-panel{background:var(--surface);border:1px solid var(--line);border-radius:1rem;padding:clamp(1.2rem,3vw,2rem);min-width:0}
+.lab-panel h2{font-size:1.7rem}
+.lab-panel label{display:block;margin-top:1rem}
+.lab-panel select,.lab-panel button{display:block;margin-top:.6rem;max-width:100%}
+.lab-panel dl{display:grid;grid-template-columns:auto 1fr;gap:.5rem 1rem;margin:1rem 0 0}
+.lab-panel dt{color:var(--muted)}.lab-panel dd{margin:0;overflow-wrap:anywhere}
+.lab-panel table{border-collapse:collapse;width:100%;margin-top:1rem;font-size:.875rem}
+.lab-panel th,.lab-panel td{border-bottom:1px solid var(--line);text-align:left;padding:.5rem .3rem;font-variant-numeric:tabular-nums}
+.lab-panel th:not(:first-child),.lab-panel td:not(:first-child){text-align:right}
+@media(max-width:45rem){.lab-grid{grid-template-columns:minmax(0,1fr)}.top nav{order:3;flex-basis:100%}}
