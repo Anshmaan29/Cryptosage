@@ -87,3 +87,9 @@ A session expires after one hour or is replaced by a fresh handshake. Transport 
 The default relay binds to loopback. An explicit LAN flag permits a LAN-facing relay while both browser UIs remain loopback-only. LAN WebSockets do not use TLS. See [Two-laptop demo](TWO-LAPTOP-DEMO.md).
 
 The optional relay view serves a read-only page on a separate loopback port. It holds up to 100 recent envelope summaries in memory. Each includes the observed UTC time, type, routing names, size, session ID prefix, counter and a short base64 ciphertext preview where applicable. The relay neither decrypts nor verifies the message ciphertext. Fields sent by an arbitrary endpoint can be mislabeled.
+
+## Registration and domain labels
+
+The relay sends a fresh random challenge. A client signs the registration domain, challenge and routing name with its ML-DSA identity key. The relay verifies the public signature and keeps the first observed fingerprint for that name in memory. Restart clears this routing association. Contact pins remain the endpoint's separate authentication decision.
+
+The native protocol version changed from `crytosage/2` to `crytosage/3`. No existing HKDF or registration domain label was renamed. The added hybrid combiner label is `crytosage/2/hybrid`. The full set of key schedule labels is listed in [the project report](REPORT.md).

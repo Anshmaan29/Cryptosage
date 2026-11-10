@@ -58,3 +58,9 @@ The symmetric chain has no new entropy between post-quantum re-keys. Compromise 
 Useful research extensions include an independently reviewed protocol specification, formal state-machine analysis, tighter native secret handling, continuous native-memory profiling, transport-aware benchmark decomposition, bounded skipped-message handling, independent review of authenticated delivery receipts, and expert review of the hybrid key combiner. These changes require their own security analysis rather than adding feature flags to the current guarantees.
 
 Multiple simultaneous conversations are future work. The current client maintains one active session at a time.
+
+## Negotiation and observer review
+
+The native `crytosage/3` offer and response authenticate the hybrid public keys, policies, selected KEM and AEAD. The message header also authenticates the selected AEAD. Hybrid mode combines independently generated KEM and X25519 secrets using transcript-salted HKDF. This custom construction requires independent review.
+
+The optional relay observer is read-only and loopback-bound. It stores bounded metadata and ciphertext previews in memory. Its display reflects fields provided to the relay and does not authenticate their semantic meaning.
