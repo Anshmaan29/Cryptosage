@@ -5,7 +5,7 @@ import socket
 from contextlib import asynccontextmanager
 import pytest
 from client.runtime import Client
-from server.relay import run
+from server.relay import run, verify_registration
 
 
 def free_port():
@@ -29,10 +29,10 @@ async def stop(task):
 
 
 @asynccontextmanager
-async def clients(tmp_path, attack=None):
+async def clients(tmp_path, attack=None, *, observer=None):
     port = free_port()
     url = f"ws://127.0.0.1:{port}"
-    relay = asyncio.create_task(run(port=port, attack=attack))
+    relay = asyncio.create_task(run(port=port, attack=attack, observer=observer))
     a = Client("Alice", tmp_path / "alice", tmp_path / "contacts", url)
     b = Client("Bob", tmp_path / "bob", tmp_path / "contacts", url)
     a.identity.pin("Bob", b.identity.public, b.identity.fingerprint)
@@ -47,8 +47,14 @@ async def clients(tmp_path, attack=None):
 
 
 async def establish(a, b):
-    await a.establish("Bob")
-    await until(lambda: a.peer.session and b.peer.session)
+    started = await a.establish("Bob")
+    await until(
+        lambda: all(
+            client.peer.session
+            and client.peer.session.session_id == started["session_id"]
+            for client in (a, b)
+        )
+    )
     assert a.peer.session.session_id == b.peer.session.session_id
 
 
@@ -171,6 +177,7 @@ async def test_malformed_relay_registration_closes_cleanly(hello, caplog):
         else:
             pytest.fail("Relay startup failed")
         async with ws:
+            assert json.loads(await ws.recv())["type"] == "challenge"
             await ws.send(json.dumps(hello))
             with pytest.raises(ConnectionClosed) as closed:
                 await ws.recv()
@@ -238,5 +245,282 @@ async def test_unconfirmed_delivery_timeout_closes_session(tmp_path):
         }
         state = a.state()
         assert state["session"] is None
-        assert state["messages"][-1]["status"] == "failed"
+        assert state["messages"][-1]["status"] == "unconfirmed"
         assert "receipt" in state["messages"][-1]["error"]
+
+
+async def test_lost_receipt_retry_after_both_clients_restart(tmp_path):
+    import json
+
+    from websockets.asyncio.server import serve
+
+    registered = {}
+    dropped = asyncio.Event()
+    routed = []
+
+    async def route(ws):
+        name, _, _ = await verify_registration(ws)
+        registered[name] = ws
+        await ws.send(json.dumps({"type": "registered", "name": name}))
+        try:
+            async for raw in ws:
+                packet = json.loads(raw)
+                if packet["type"] == "message":
+                    routed.append(packet)
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "relay_sent",
+                                "sid": packet["sid"],
+                                "counter": packet["counter"],
+                            }
+                        )
+                    )
+                if packet["type"] == "delivery" and not dropped.is_set():
+                    dropped.set()
+                    continue
+                await registered[packet["to"]].send(raw)
+        finally:
+            registered.pop(name, None)
+
+    async with serve(route, "127.0.0.1", 0) as relay:
+        port = next(iter(relay.sockets)).getsockname()[1]
+        url = f"ws://127.0.0.1:{port}"
+
+        def restore():
+            return tuple(
+                Client(name, tmp_path / name, tmp_path / "contacts", url)
+                for name in ("Alice", "Bob")
+            )
+
+        a, b = restore()
+        a.identity.pin("Bob", b.identity.public, b.identity.fingerprint)
+        b.identity.pin("Alice", a.identity.public, a.identity.fingerprint)
+        tasks = [asyncio.create_task(c.run()) for c in (a, b)]
+        try:
+            await until(lambda: a.connected and b.connected)
+            await establish(a, b)
+            old = a.peer.session.session_id
+            result = await a.send("Private message with a lost acknowledgement")
+            assert result["status"] == "pending"
+            await asyncio.wait_for(dropped.wait(), 6)
+            await until(lambda: a.messages[0]["status"] == "sent")
+            assert b.messages[0]["id"] == result["id"]
+            with pytest.raises(ValueError, match="Only failed or unconfirmed"):
+                await a.retry(result["id"])
+        finally:
+            for task in tasks:
+                await stop(task)
+
+        a, b = restore()
+        assert a.messages[0]["status"] == "unconfirmed"
+        assert a.peer.session is b.peer.session is None
+        assert len(b.seen_messages) == 1
+        tasks = [asyncio.create_task(c.run()) for c in (a, b)]
+        try:
+            await until(lambda: a.connected and b.connected)
+            await establish(a, b)
+            assert a.peer.session.session_id != old
+            retried = await a.retry(result["id"])
+            assert retried["id"] == result["id"]
+            await until(lambda: a.messages[0]["status"] == "delivered")
+            assert len(a.messages) == len(b.messages) == len(b.seen_messages) == 1
+            assert any(event["kind"] == "duplicate" for event in b.events)
+            assert (
+                len(routed) == 2 and routed[0]["ciphertext"] != routed[1]["ciphertext"]
+            )
+            assert routed[0]["sid"] != routed[1]["sid"]
+            for packet in routed:
+                assert set(packet) == {
+                    "type",
+                    "v",
+                    "sid",
+                    "from",
+                    "to",
+                    "counter",
+                    "aead",
+                    "ciphertext",
+                }
+                assert packet["aead"] == "AES-256-GCM"
+                assert result["id"] not in json.dumps(packet)
+                assert a.messages[0]["text"] not in json.dumps(packet)
+            with pytest.raises(ValueError, match="Only failed or unconfirmed"):
+                await a.retry(result["id"])
+        finally:
+            for task in tasks:
+                await stop(task)
+
+
+async def test_simultaneous_sends_have_independent_chains_and_receipts(tmp_path):
+    async with clients(tmp_path) as (a, b, _, _):
+        await establish(a, b)
+        await asyncio.gather(a.send("Alice concurrently"), b.send("Bob concurrently"))
+        await until(
+            lambda: all(
+                len(client.messages) == 2 and not client.outbox for client in (a, b)
+            )
+        )
+        for client, expected in ((a, "Bob concurrently"), (b, "Alice concurrently")):
+            assert (
+                next(m for m in client.messages if m["direction"] == "sent")["status"]
+                == "delivered"
+            )
+            assert (
+                next(m for m in client.messages if m["direction"] == "received")["text"]
+                == expected
+            )
+            assert (
+                client.peer.session.send_count == client.peer.session.receive_count == 1
+            )
+
+
+def test_receipt_only_acknowledges_exact_authenticated_packet(peers):
+    from protocol.session import complete_handshake
+
+    alice, bob = peers
+    complete_handshake(alice, bob)
+    packet = alice.session.seal("Original")
+    bob.session.open(packet)
+    with pytest.raises(ValueError, match="authenticated, consumed"):
+        bob.session.delivery_receipt({**packet, "ciphertext": "different"})
+    receipt = bob.session.delivery_receipt(packet)
+    with pytest.raises(ValueError, match="does not match"):
+        alice.session.receipt_expectation(packet).verify({**receipt, "counter": False})
+
+
+async def test_session_lifetime_expires_without_reusing_a_chain(tmp_path):
+    async with clients(tmp_path) as (a, b, _, _):
+        await establish(a, b)
+        session = a.peer.session
+        session.expires_at = 0
+        with pytest.raises(ValueError, match="Session expired"):
+            session.seal("must reject")
+        with pytest.raises(ValueError, match="Open and authenticate"):
+            await a.send("must reject")
+        await establish(a, b)
+        assert a.peer.session.session_id != session.session_id
+
+
+async def test_real_clients_negotiate_hqc_only_with_both_policies_opted_in(tmp_path):
+    async with clients(tmp_path) as (a, b, _, _):
+        for client in (a, b):
+            client.peer.policy["allow_experimental"] = True
+            for name, rule in client.peer.policy["algorithms"].items():
+                if name != "HQC-3":
+                    rule["status"] = "prohibited"
+        await establish(a, b)
+        assert a.peer.session.algorithm == b.peer.session.algorithm == "HQC-3"
+        await a.send("HQC session uses real loopback transport")
+        await until(lambda: a.messages[0]["status"] == "delivered")
+        assert b.messages[0]["text"] == a.messages[0]["text"]
+
+
+async def test_previous_session_receives_in_flight_message_after_rekey(tmp_path):
+    import json
+    import time
+
+    async with clients(tmp_path) as (a, b, _, _):
+        await establish(a, b)
+        old = a.peer.session
+        await a.establish("Bob")
+        # Hold an envelope from the retiring epoch until both peers install the replacement.
+        packet = old.seal("In flight during re-key")
+        outgoing = {
+            "direction": "sent",
+            "peer": "Bob",
+            "text": "In flight during re-key",
+            "time": "2026-11-11",
+            "status": "sent",
+        }
+        a.messages.append(outgoing)
+        a.outbox[(packet["sid"], packet["counter"])] = {
+            "message": outgoing,
+            "expectation": old.receipt_expectation(packet),
+            "started": time.monotonic(),
+        }
+        await until(lambda: a.peer.session.session_id != old.session_id)
+        assert a.peer.session.session_id == b.peer.session.session_id
+        await a.socket.send(json.dumps(packet))
+        await until(lambda: outgoing["status"] == "delivered")
+        assert [row["text"] for row in b.messages] == ["In flight during re-key"]
+
+
+async def test_simultaneous_automatic_rekey_keeps_both_sends(tmp_path):
+    async with clients(tmp_path) as (a, b, _, _):
+        for client in (a, b):
+            client.peer.policy["rekey_interval"] = 1
+        await establish(a, b)
+        old = a.peer.session.session_id
+        await asyncio.gather(a.send("first Alice"), b.send("first Bob"))
+        await until(lambda: not a.outbox and not b.outbox)
+        await asyncio.gather(a.send("second Alice"), b.send("second Bob"))
+        await until(lambda: not a.outbox and not b.outbox)
+        assert a.peer.session.session_id == b.peer.session.session_id != old
+        assert [
+            row["text"] for row in a.messages if row["direction"] == "received"
+        ] == ["first Bob", "second Bob"]
+        assert [
+            row["text"] for row in b.messages if row["direction"] == "received"
+        ] == ["first Alice", "second Alice"]
+
+
+async def test_relay_accepts_original_key_and_refuses_unverified_key_change(tmp_path):
+    from protocol.identity import Identity
+    from protocol.registration import register_client
+    from websockets.asyncio.client import connect
+    from websockets.exceptions import ConnectionClosed
+
+    async with clients(tmp_path) as (a, _, _, _):
+        await a.socket.close()
+        impostor = Identity(tmp_path / "replacement", "Alice")
+        async with connect(a.relay_url, proxy=None) as ws:
+            with pytest.raises(ConnectionClosed, match="Routing identity key changed"):
+                await register_client(ws, impostor)
+        await until(
+            lambda: a.connected and a.socket is not None and a.socket.close_code is None
+        )
+
+
+async def test_observer_sees_real_encrypted_message_and_bounded_metadata(tmp_path):
+    from server.observer import FIELDS, Observer
+
+    observer = Observer()
+    async with clients(tmp_path, observer=observer) as (alice, bob, _, _):
+        await establish(alice, bob)
+        plaintext = "Only the endpoints see this message — नमस्ते"
+        await alice.send(plaintext)
+        await until(
+            lambda: bob.messages and alice.messages[-1]["status"] == "delivered"
+        )
+        row = next(row for row in observer.entries if row["type"] == "message")
+        assert set(row) == set(FIELDS)
+        assert row["from"] == "Alice" and row["to"] == "Bob"
+        assert row["session"] == alice.peer.session.session_id[:12]
+        assert row["counter"] == 0 and len(row["ciphertext"]) == 32
+        assert plaintext not in str(observer.entries)
+        assert bob.messages[-1]["text"] == plaintext
+        for _ in range(110):
+            observer.record({"from": "Alice", "to": "Bob", "type": "delivery"}, "{}")
+        assert len(observer.entries) == 100
+        assert row not in observer.entries
+
+
+def test_relay_lan_flag_and_read_only_view():
+    from fastapi.testclient import TestClient
+    from server.observer import Observer
+    from server.relay import parse_args
+
+    with pytest.raises(SystemExit):
+        parse_args(["--host", "0.0.0.0"])
+    assert parse_args(["--host", "0.0.0.0", "--lan"]).lan
+    assert parse_args([]).observe_port is None
+    with pytest.raises(SystemExit):
+        parse_args(["--port", "8766", "--observe-port", "8766"])
+    with TestClient(Observer().app(8766), base_url="http://127.0.0.1:8766") as http:
+        response = http.get("/")
+        assert response.status_code == 200 and "What the relay sees" in response.text
+        assert http.get("/", headers={"Host": "example.com"}).status_code == 403
+        assert (
+            http.get("/", headers={"Sec-Fetch-Site": "cross-site"}).status_code == 403
+        )
+        assert http.post("/").status_code == 405

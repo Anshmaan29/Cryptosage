@@ -214,7 +214,7 @@ dialog .field-hint { margin: 8px 0 20px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
 
 button:active { filter: brightness(.92); }
-:root[data-theme="dark"] { --canvas:#151e1a; --surface:#1d2923; --surface-soft:#25352c; --surface-selected:#314c3a; --ink:#e4ebe2; --ink-strong:#e7f3e9; --muted:#b3c3b3; --subtle:#a3b3a3; --accent:#9bcba8; --accent-hover:#bde0c5; --on-accent:#14281c; --accent-soft:#2c4031; --border:#405347; --input-border:#91a895; --border-strong:#5d7563; --warning:#eed094; --warning-surface:#463a20; --danger:#ffb5a5; --danger-surface:#492a27; --sent:#345d49; }
+:root[data-theme="dark"] { --canvas:#151e1a; --surface:#1d2923; --surface-soft:#25352c; --surface-selected:#314c3a; --ink:#e4ebe2; --ink-strong:#e7f3e9; --muted:#b3c3b3; --subtle:#a3b3a3; --accent:#9bcba8; --accent-hover:#bde0c5; --focus:#bde0c5; --on-accent:#14281c; --accent-soft:#2c4031; --border:#405347; --input-border:#91a895; --border-strong:#5d7563; --warning:#eed094; --warning-surface:#463a20; --danger:#ffb5a5; --danger-surface:#492a27; --sent:#345d49; }
 [hidden] { display:none !important; }
 @media (max-width: 700px) { #contacts-panel.mobile-open { display:block; } }
 .check-field { display:flex; align-items:center; gap:10px; margin:16px 0; }
@@ -222,3 +222,60 @@ button:active { filter: brightness(.92); }
 .policy-fields { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
 .policy-algorithms { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
 @media (max-width:700px) { .policy-fields,.policy-algorithms { grid-template-columns:1fr; } }
+
+
+.lab-heading {
+  gap: 24px;
+  align-items: center;
+  min-height: 156px;
+  padding: 24px clamp(16px, 3vw, 32px);
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+.lab-heading p { max-width: 49ch; line-height: 1.6; }
+.lab-heading-aside { display: grid; justify-items: end; gap: 4px; }
+.lab-mark { display: block; width: clamp(120px, 18vw, 240px); }
+.lab-mark-axis { fill: none; stroke: var(--border-strong); stroke-dasharray: 2 5; }
+.lab-mark-flight { fill: var(--surface-selected); fill-opacity: .45; stroke: var(--accent); transform-origin: center; transform-box: fill-box; }
+.lab-mark-lock { fill: none; stroke: var(--ink-strong); stroke-width: 1.6; stroke-linejoin: round; }
+.app-footer { position: relative; }
+.footer-rule { position: absolute; inset: 0 0 auto; height: 2px; background: var(--accent); transform: scaleX(.1); transform-origin: left; }
+.lab-view[hidden] + .app-footer .footer-rule { display: none; }
+
+@media (max-width: 600px) {
+  .lab-heading { flex-wrap: wrap; gap: 12px; min-height: 0; }
+  .lab-heading-aside { width: 100%; grid-template-columns: 1fr auto; align-items: center; justify-items: start; }
+  .lab-mark { height: 54px; width: 112px; }
+}
+
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .lab-heading { view-timeline: --lab-heading block; }
+    .lab-mark-flight {
+      animation: lab-flight linear both;
+      animation-timeline: --lab-heading;
+      animation-range: exit 0% exit 90%;
+    }
+    .flight-a { --morph-x: 36px; }
+    .flight-b { --morph-x: 9px; --morph-y: 8px; }
+    .flight-c { --morph-x: -9px; --morph-y: -8px; }
+    .flight-d { --morph-x: -36px; }
+    .app-footer { view-timeline: --lab-footer block; }
+    .footer-rule {
+      animation: footer-unfold linear both;
+      animation-timeline: --lab-footer;
+      animation-range: entry 0% entry 100%;
+    }
+  }
+}
+
+@keyframes lab-flight { to { transform: translate(var(--morph-x), var(--morph-y, 0)) scale(.64); } }
+@keyframes footer-unfold { to { transform: scaleX(1); } }
+
+#contact-card-button { align-self: flex-start; margin: 12px 8px 0; }
+#contact-card-form label { display: block; margin-top: 16px; }
+#contact-card-form textarea { display: block; width: 100%; margin-top: 8px; }
+#contact-card-file { display: block; max-width: 100%; margin-bottom: 16px; }
+
+.event-rejected, .event-rejected .event-kind { color: var(--danger); }

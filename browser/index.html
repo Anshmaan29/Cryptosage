@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Cryptosage browser prototype. Open a private room and send an authenticated, encrypted message.">
+  <title>Cryptosage | Private chat</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <script type="module" src="/app.mjs"></script>
+</head>
+<body>
+  <header class="top">
+    <a href="/" class="brand"><span aria-hidden="true"></span>Cryptosage</a>
+    <span class="pill" id="state" role="status">Ready to create a chat</span>
+  </header>
+  <main>
+    <section id="lobby" class="hero" aria-labelledby="hero-title">
+      <div>
+        <h1 id="hero-title">Private chat. Real cryptography.</h1>
+        <p id="intro">Create a room and share its invite with one person. Both devices do their own cryptography in the browser.</p>
+        <label id="algorithm-label" for="algorithm">Key exchange</label>
+        <select id="algorithm">
+          <option value="ML-KEM-768">ML-KEM-768</option>
+          <option value="HQC-3">HQC-3 (experimental)</option>
+        </select>
+        <button class="primary" id="start">Create private chat</button>
+        <p class="muted">Research prototype. Use test messages.</p>
+      </div>
+      <svg class="hero-graphic" viewBox="0 0 500 310" aria-hidden="true" focusable="false">
+        <path class="guide" d="M24 155h452M250 18v274"/>
+        <rect class="flight flight-a" x="38" y="101" width="150" height="108" rx="14"/>
+        <rect class="flight flight-b" x="128" y="62" width="150" height="108" rx="14"/>
+        <rect class="flight flight-c" x="222" y="140" width="150" height="108" rx="14"/>
+        <rect class="flight flight-d" x="312" y="101" width="150" height="108" rx="14"/>
+        <path class="lock" d="M233 148v-12a17 17 0 0 1 34 0v12m-39 0h44v38h-44zm22 14v10"/>
+      </svg>
+    </section>
+    <section class="notes" id="notes" aria-labelledby="notes-title">
+      <h2 id="notes-title">Open the invite on a second device</h2>
+      <p>Share it directly with your intended peer. The invite authorizes one guest and carries the secret the browsers use to verify each other. Reloading ends your browser session.</p>
+    </section>
+    <section id="chat" class="chat" hidden aria-labelledby="chat-title">
+      <header class="chat-head">
+        <div><h1 id="chat-title">Private chat</h1><p id="session-description">Waiting for the second device</p></div>
+        <div class="room-actions"><button id="reconnect" type="button" hidden>Reconnect</button><a href="/">Leave chat</a></div>
+      </header>
+      <div class="invite" id="invite" hidden>
+        <div><strong>Invite the other device</strong><p>Send this link privately to one person. Anyone with it can join.</p></div>
+        <label class="sr-only" for="invite-link">Private invite link</label>
+        <input id="invite-link" readonly>
+        <button id="copy" type="button">Copy invite</button>
+      </div>
+      <ol class="messages" id="messages" aria-label="Conversation" aria-live="polite"></ol>
+      <form class="composer" id="compose">
+        <label class="sr-only" for="message">Message</label>
+        <textarea id="message" rows="2" maxlength="16384" placeholder="Wait for the authenticated session" disabled></textarea>
+        <button class="primary" id="send" type="submit" disabled>Send</button>
+      </form>
+    </section>
+    <p class="notice" id="notice" role="alert" hidden></p>
+  </main>
+  <footer class="foot"><span class="footer-line" aria-hidden="true"></span><span>Cryptosage browser prototype</span><a href="/licenses/liboqs.txt">liboqs license</a><a href="/">Start a new chat</a></footer>
+</body>
+</html>

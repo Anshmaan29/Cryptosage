@@ -16,13 +16,15 @@
 
 `minimum_security_level` accepts integers 1 through 5. Both implemented KEMs claim level 3, so a minimum above 3 leaves no acceptable candidate. `status` accepts `recommended`, `experimental`, or `prohibited`. Priorities are nonnegative integers up to 1000; lower values are preferred. Preferences are `latency`, `cpu`, `memory`, `bandwidth`, and `balanced`.
 
+Default level 3 admits ML-KEM-768 and ML-KEM-1024 at equal priority. When both peers lack comparable measurements, the selector uses the library-reported public-key plus ciphertext size. That favors ML-KEM-768. A minimum of level 5 selects ML-KEM-1024 by default.
+
 The selection engine intersects the two offered capability lists and verifies its own installed implementations. It rejects a candidate if either policy prohibits it, lacks its rule, requires a higher level, or disallows an experimental implementation. Reclassifying HQC-3 as recommended in a JSON file does not remove its implementation's experimental status.
 
 Among remaining candidates, it orders by recommended versus experimental status, sum of the two priorities, normalized measured performance score, and algorithm identifier as a deterministic tie-break. Measurements influence selection only when the required metric is finite, nonnegative, and comparable across all candidates in both signed snapshots. Missing measurements produce an explicit deterministic fallback. Neither signed measurements nor signatures establish that a malicious peer reported honest performance, so security admissibility always comes first.
 
 ## Laboratory examples
 
-To require HQC-3 in an experiment, make a copy of the policy for each client. Set `allow_experimental` to `true` in both copies and prohibit ML-KEM-768:
+To require HQC-3 in an experiment, make a copy of the policy for each client. Set `allow_experimental` to `true` in both copies and prohibit both recommended ML-KEMs. The following narrow policy lists only ML-KEM-768 and HQC-3, so unlisted algorithms are also excluded:
 
 ```json
 {
@@ -41,3 +43,9 @@ Start both clients with their respective `--policy` file. This creates a new HQC
 To demonstrate refusal, prohibit ML-KEM-768 while leaving `allow_experimental` false, or require minimum level 4. The clients should reject establishment with a policy reason. Do not edit application code to make a prohibited session succeed.
 
 The engine selects among known implementations and configured rules. It does not discover unknown vulnerabilities or infer cryptographic safety from benchmark speed.
+
+## Native session protection
+
+The default hybrid setting is `preferred`. Both policies must permit X25519 to combine it with the selected post-quantum KEM. A `required` and `off` pairing refuses the session. An `off` setting preserves the post-quantum KEM and disables the extra classical exchange. The local Policy Manager asks for explicit confirmation before weakening the current hybrid requirement.
+
+Both peers advertise ordered AEAD preferences. The first option in the initiator’s list that the responder accepts is selected. The default lists AES-256-GCM first and ChaCha20-Poly1305 second. Sessions with no mutual AEAD are refused. Changes take effect on the next handshake.

@@ -2,7 +2,8 @@
 
 import argparse
 from pathlib import Path
-from protocol.identity import Identity, b64, private_write
+from protocol.identity import Identity, b64, private_write, valid_name
+from client.storage import LocalStore, private_lock
 
 
 def initialize(root: Path, names=("Alice", "Bob")):
@@ -24,5 +25,25 @@ if __name__ == "__main__":
     p.add_argument(
         "--name", action="append", help="Repeat to create custom local identities"
     )
+    p.add_argument(
+        "--migrate-to-keychain",
+        action="store_true",
+        help="Copy an existing profile key to Keychain; retain the original key file",
+    )
     a = p.parse_args()
-    initialize(a.root, a.name or ("Alice", "Bob"))
+    if a.migrate_to_keychain:
+        if not a.name:
+            p.error("Choose the existing profile with --name and stop its client first")
+        for name in a.name:
+            profile = a.root / valid_name(name)
+            if not (profile / ".keystore/config.json").is_file():
+                p.error("Migration requires an existing profile")
+            with private_lock(
+                profile / ".client.lock", "Stop this client before migrating its key"
+            ):
+                LocalStore(profile).migrate_to_keychain()
+            print(
+                f"{name}: Keychain backend selected. Original key file retained for recovery."
+            )
+    else:
+        initialize(a.root, a.name or ("Alice", "Bob"))

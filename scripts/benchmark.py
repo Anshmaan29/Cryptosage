@@ -3,13 +3,16 @@
 import argparse
 from benchmarks.runner import run
 from benchmarks.protocol_adapter import factory
+from benchmarks.transport import PROFILES
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--trials", type=int, default=30)
     p.add_argument("--output", default="reports/benchmarks")
-    p.add_argument(
+    network = p.add_mutually_exclusive_group()
+    network.add_argument("--profile", choices=PROFILES)
+    network.add_argument(
         "--delay-ms",
         type=float,
         default=0,
@@ -20,7 +23,7 @@ def main():
         p.error("--trials must be from 2 to 1000")
     if not 0 <= a.delay_ms <= 250:
         p.error("--delay-ms must be from 0 to 250")
-    callback, directory = factory(delay_ms=a.delay_ms)
+    callback, directory = factory(delay_ms=a.delay_ms, profile=a.profile)
     try:
         report = run(a.trials, a.output, handshake_factory=callback)
     finally:

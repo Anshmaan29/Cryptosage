@@ -4,18 +4,21 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-import xml.etree.ElementTree as ET
+from typing import Any
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 
 OUTCOMES = ("passed", "failed", "error", "skipped", "xfailed")
 
 
 def parse_outcomes(path: Path, exit_code: int) -> dict:
-    report = {
+    report: dict[str, Any] = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "runner_exit": exit_code,
         "counts": {outcome: 0 for outcome in OUTCOMES},
@@ -29,8 +32,8 @@ def parse_outcomes(path: Path, exit_code: int) -> dict:
         )
         return report
     try:
-        tree = ET.parse(path)
-    except ET.ParseError:
+        tree = ET.parse(path, forbid_dtd=True)
+    except (ET.ParseError, DefusedXmlException):
         report["diagnostic"] = (
             "Runner produced malformed JUnit output; evaluation is incomplete."
         )
@@ -131,8 +134,8 @@ def write_reports(report: dict, directory: Path) -> None:
 
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
-    directory = root / "reports"
-    directory.mkdir(exist_ok=True)
+    directory = Path(os.environ.get("CRYTOSAGE_REPORT_DIR", root / "reports")).resolve()
+    directory.mkdir(parents=True, exist_ok=True)
     xml = directory / "tests.xml"
     xml.unlink(missing_ok=True)
     result = subprocess.run(

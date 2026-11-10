@@ -28,8 +28,8 @@ def test_v2_catalog_exercises_real_rejection_or_secure_abort(scenario):
 
 
 def test_v2_catalog_is_unique_and_legacy_interface_stays_compatible():
-    assert len(CATALOG) == len(ALL_SCENARIOS) == 12
-    assert len(set(ALL_SCENARIOS)) == 12
+    assert len(CATALOG) == len(ALL_SCENARIOS) == 13
+    assert len(set(ALL_SCENARIOS)) == 13
     assert SCENARIOS == ("downgrade", "identity", "replay", "tamper", "invalid")
     assert all(set(row) == {"id", "name", "objective", "mutation"} for row in CATALOG)
 

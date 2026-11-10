@@ -2,15 +2,16 @@
 
 from datetime import datetime, timezone
 from pathlib import Path
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 
 def test_results(path: Path) -> dict:
     if not path.is_file():
         return {"tests": [], "test_report_status": "not_run"}
     try:
-        root = ET.parse(path)
-    except ET.ParseError:
+        root = ET.parse(path, forbid_dtd=True)
+    except (ET.ParseError, DefusedXmlException):
         return {"tests": [], "test_report_status": "invalid_report"}
     tests = []
     for case in root.iter("testcase"):

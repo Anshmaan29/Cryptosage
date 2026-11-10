@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
-from crypto.primitives import available_algorithms
+from crypto.primitives import AEADS, available_algorithms
 
 
 class PolicyError(ValueError):
@@ -23,7 +23,14 @@ class PolicyError(ValueError):
         }
 
 
-KNOWN = {"ML-KEM-768": 3, "HQC-3": 3}
+KNOWN = {
+    "ML-KEM-512": 1,
+    "ML-KEM-768": 3,
+    "ML-KEM-1024": 5,
+    "HQC-1": 1,
+    "HQC-3": 3,
+    "HQC-5": 5,
+}
 PREFERENCES = {
     "latency": ("handshake_ms",),
     "cpu": ("cpu_ms",),
@@ -33,11 +40,11 @@ PREFERENCES = {
 }
 
 
-def _measurement(value: Any) -> bool:
+def _measurement(value: Any) -> TypeGuard[float]:
     return type(value) in (int, float) and 0 <= value <= 1e18 and math.isfinite(value)
 
 
-def validate_policy(policy: dict[str, Any]) -> dict[str, Any]:
+def validate_policy(policy: Any) -> dict[str, Any]:
     if not isinstance(policy, dict):
         raise PolicyError("Policy must be an object")
     level = policy.get("minimum_security_level")
@@ -45,18 +52,31 @@ def validate_policy(policy: dict[str, Any]) -> dict[str, Any]:
         raise PolicyError("Minimum security level must be an integer from 1 to 5")
     if type(policy.get("allow_experimental")) is not bool:
         raise PolicyError("allow_experimental must be a boolean")
-    if policy.get("performance_preference") not in PREFERENCES:
+    if (
+        not isinstance(policy.get("performance_preference"), str)
+        or policy["performance_preference"] not in PREFERENCES
+    ):
         raise PolicyError("Unsupported performance preference")
     interval = policy.get("rekey_interval", 100)
     if type(interval) is not int or not 1 <= interval <= 100:
         raise PolicyError("Re-key interval must be an integer from 1 to 100 messages")
+    if policy.get("hybrid_x25519", "preferred") not in ("off", "preferred", "required"):
+        raise PolicyError("Invalid X25519 hybrid policy")
+    aead = policy.get("aead", list(AEADS))
+    if (
+        not isinstance(aead, list)
+        or not 1 <= len(aead) <= len(AEADS)
+        or any(not isinstance(name, str) or name not in AEADS for name in aead)
+        or len(set(aead)) != len(aead)
+    ):
+        raise PolicyError("Invalid AEAD preference list")
     rules = policy.get("algorithms")
     if not isinstance(rules, dict) or not rules or len(rules) > 16:
         raise PolicyError("Policy must contain algorithm rules")
     for name, rule in rules.items():
         if name not in KNOWN or not isinstance(rule, dict):
             raise PolicyError("Unsupported policy algorithm")
-        if rule.get("status") not in {"recommended", "experimental", "prohibited"}:
+        if rule.get("status") not in ("recommended", "experimental", "prohibited"):
             raise PolicyError("Invalid algorithm status")
         priority = rule.get("priority")
         if type(priority) is not int or not 0 <= priority <= 1000:
@@ -83,12 +103,35 @@ def _offer(offer: dict[str, Any]) -> tuple[set[str], dict[str, Any]]:
     return set(names), validate_policy(offer.get("policy"))
 
 
+def installed_algorithms() -> dict[str, dict[str, Any]]:
+    installed = {row["name"]: row for row in available_algorithms()}
+    for name, row in installed.items():
+        if KNOWN.get(name) != row["security_level"]:
+            raise PolicyError(f"Unexpected native security level for {name}")
+    return installed
+
+
+def admissible_algorithms(policy: dict) -> list[str]:
+    rules = policy["algorithms"]
+    return [
+        row["name"]
+        for row in installed_algorithms().values()
+        if (rule := rules.get(row["name"])) is not None
+        and rule["status"] != "prohibited"
+        and row["security_level"] >= policy["minimum_security_level"]
+        and (
+            policy["allow_experimental"]
+            or "experimental" not in (rule["status"], row["status"])
+        )
+    ]
+
+
 def select(
     local_offer: dict[str, Any],
     peer_offer: dict[str, Any],
     measurements: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Choose symmetrically; performance can never override policy admissibility.
+    """Choose the KEM symmetrically and the AEAD in initiator preference order.
 
     Untrusted peers cannot assert availability: only this process's actual library
     capabilities and the two signed policies decide eligibility. Measurements are
@@ -98,9 +141,7 @@ def select(
     """
     left_names, left = _offer(local_offer)
     right_names, right = _offer(peer_offer)
-    installed = {
-        row["name"]: row for row in available_algorithms() if row.get("available", True)
-    }
+    installed = installed_algorithms()
     minimum = max(left["minimum_security_level"], right["minimum_security_level"])
     interval = min(left.get("rekey_interval", 100), right.get("rekey_interval", 100))
     candidates: list[tuple[str, int, int]] = []
@@ -113,8 +154,7 @@ def select(
             rule is not None and rule["status"] != "prohibited" for rule in rules
         )
         compatible = name in left_names and name in right_names and row is not None
-        actual_level = row.get("security_level", 0) if row else 0
-        level = min(actual_level, KNOWN[name]) if type(actual_level) is int else 0
+        level = row["security_level"] if row else 0
         sufficient = level >= minimum
         experimental = any(rule and rule["status"] == "experimental" for rule in rules)
         experimental |= bool(row and row.get("status") == "experimental")
@@ -218,12 +258,37 @@ def select(
             ]
         )
         raise PolicyError(message, decision)
+    modes = (
+        left.get("hybrid_x25519", "preferred"),
+        right.get("hybrid_x25519", "preferred"),
+    )
+    hybrid = "off" not in modes
+    aead = next(
+        (name for name in left.get("aead", AEADS) if name in right.get("aead", AEADS)),
+        None,
+    )
+    refusal = (
+        "X25519 hybrid is required by one client and disabled by the other"
+        if not hybrid and "required" in modes
+        else "No mutually acceptable AEAD"
+        if aead is None
+        else None
+    )
+    if refusal:
+        steps.append({"stage": "selection", "detail": refusal})
+        raise PolicyError(refusal, decision)
+    rank = min((experimental, priority) for _, experimental, priority in candidates)
+    ranked = [
+        name
+        for name, experimental, priority in candidates
+        if (experimental, priority) == rank
+    ]
     if measurements is None:
         snapshots = [
             offer.get("measurements", {}) for offer in (local_offer, peer_offer)
         ]
         measurements = {}
-        for name, _, _ in candidates:
+        for name in ranked:
             combined = {}
             for metric in sorted(
                 {metric for values in PREFERENCES.values() for metric in values}
@@ -235,8 +300,9 @@ def select(
                     else None
                     for snapshot in snapshots
                 ]
-                if all(_measurement(value) for value in values):
-                    combined[metric] = sum(values) / len(values)
+                valid = [value for value in values if _measurement(value)]
+                if len(valid) == len(values):
+                    combined[metric] = sum(valid) / len(valid)
             measurements[name] = combined
     if not isinstance(measurements, dict):
         raise PolicyError("Measured performance profile must be an object", decision)
@@ -251,55 +317,63 @@ def select(
     )
     usable: dict[str, dict[str, float]] = {}
     for metric in metrics:
-        values = {
+        by_algorithm = {
             name: data.get(name, {}).get(metric)
             if isinstance(data.get(name), dict)
             else None
-            for name, _, _ in candidates
+            for name in ranked
         }
-        if all(_measurement(value) for value in values.values()):
-            usable[metric] = values
+        comparable = {
+            name: value for name, value in by_algorithm.items() if _measurement(value)
+        }
+        if len(comparable) == len(by_algorithm):
+            usable[metric] = comparable
+
+    fallback = "static size from library, not a measurement"
+    scores_from = dict(usable)
+    missing = [metric for metric in metrics if metric not in usable]
+    if missing:
+        scores_from["static_size_bytes"] = {
+            name: installed[name]["public_key_bytes"]
+            + installed[name]["ciphertext_bytes"]
+            for name in ranked
+        }
 
     def score(name: str) -> float:
         return sum(
             values[name] / max(max(values.values()), 1e-12)
-            for values in usable.values()
+            for values in scores_from.values()
         )
 
-    chosen, experimental, priority = min(
-        candidates, key=lambda item: (item[1], item[2], score(item[0]), item[0])
-    )
-    same_rank = [
-        name
-        for name, exp, prio in candidates
-        if exp == experimental and prio == priority
-    ]
-    performance_used = bool(usable) and len(same_rank) > 1
+    chosen = min(ranked, key=lambda name: (score(name), name))
+    chosen_experimental, priority = rank
+    performance_used = len(ranked) > 1
     if performance_used:
-        measured = (
-            "comparable measured "
-            + ", ".join(usable)
-            + " used among equal policy ranks"
-        )
+        sources = []
+        if usable:
+            sources.append("comparable measured " + ", ".join(usable))
+        if missing:
+            sources.append(fallback + " (missing " + ", ".join(missing) + ")")
+        measured = " and ".join(sources) + " used among equal policy ranks"
     elif len(candidates) == 1:
         measured = "not used: only one eligible candidate"
-    elif usable:
-        measured = "available but policy status/priority determined selection before performance"
     else:
-        measured = "no complete comparable measured profile; deterministic name tie-break within equal policy ranks"
+        measured = "policy status/priority determined selection before performance"
+    suite = f"{chosen} + X25519" if hybrid else chosen
     reason = (
-        f"{chosen}: both clients permit security level {KNOWN[chosen]} (minimum {minimum}); "
-        f"{'experimental, explicitly allowed by both' if experimental else 'recommended'}; "
+        f"{suite} with {aead}: both clients permit security level {installed[chosen]['security_level']} (minimum {minimum}); "
+        f"{'experimental, explicitly allowed by both' if chosen_experimental else 'recommended'}; "
         f"combined policy priority {priority}; performance: {measured}."
     )
     decision["performance"] = {
         "metrics": list(usable),
-        "values": usable,
-        "scores": {name: score(name) for name, _, _ in candidates},
+        "values": scores_from,
+        "fallback": fallback if missing and performance_used else None,
+        "scores": {name: score(name) for name in ranked},
         "used_for_tiebreak": performance_used,
         "detail": measured,
     }
-    decision["selected"] = chosen
+    decision.update(selected=chosen, suite=suite, hybrid=hybrid, aead=aead)
     steps.extend(
         [
             {"stage": "performance", "detail": measured},
@@ -308,7 +382,10 @@ def select(
     )
     return {
         "algorithm": chosen,
-        "security_level": KNOWN[chosen],
+        "suite": suite,
+        "hybrid": hybrid,
+        "aead": aead,
+        "security_level": installed[chosen]["security_level"],
         "reason": reason,
         "rekey_interval": interval,
         "decision": decision,

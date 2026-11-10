@@ -5,8 +5,10 @@
 Run the current suite and generate the current security report from the repository root:
 
 ```sh
-.venv/bin/python -m pytest
-.venv/bin/python -m scripts.evaluate
+.venv/bin/python -m pip install -r requirements-dev.txt
+CRYTOSAGE_REPORT_DIR=reports/macos-v3 ./scripts/run_tests.sh \
+  --cov=crypto --cov=protocol --cov=policy --cov=client --cov=server --cov=attacks \
+  --cov-report=xml:reports/macos-v3/coverage.xml --cov-report=html:reports/macos-v3/coverage-html
 ```
 
 The report records observed runner outcomes. A passing test confirms its stated assertions on that run. Failures, skipped checks, and collection errors must remain visible. Reports from earlier revisions do not establish that a later change passed.
@@ -36,8 +38,12 @@ Supported names are `downgrade`, `identity`, `replay`, `tamper`, and `invalid`. 
 ## Benchmarks
 
 ```sh
-.venv/bin/python -m scripts.benchmark --trials 30
+./scripts/run_benchmarks.sh --trials 100 --profile localhost --output reports/macos-localhost
+./scripts/run_benchmarks.sh --trials 30 --profile moderate --output reports/macos-moderate
+./scripts/run_benchmarks.sh --trials 30 --profile constrained --output reports/macos-constrained
 ```
+
+Profile A adds no delay. Profile B injects 25 ms before each endpoint send. Profile C injects 100 ms before each send and adds payload serialization time at a modeled 256 kb/s. The WebSocket connection stays on localhost throughout. These profiles do not inject packet loss, limit real interface throughput, or change the independent cryptographic-computation timers.
 
 The full-protocol wrapper supplies an adapter that creates independently pinned identities, completes all four handshake flights, sends an authenticated encrypted ping and pong, and measures the real work. A separate per-trial loopback WebSocket relay measures the protocol over real sockets and a fixed opaque transport round trip. Identity creation and relay startup are outside the handshake timing. The lower-level `python -m benchmarks.runner` command measures primitive KEM computation without that adapter and labels full-handshake measurements unavailable.
 
@@ -51,7 +57,7 @@ Measurements include key generation, encapsulation, decapsulation, public-key an
 - RSS is sampled around operations. It can miss a short native allocation spike. Process high-water RSS is cumulative and cannot attribute a prior peak to the current trial.
 - `tracemalloc` reports Python allocation peaks, not all native liboqs allocations. None of these is a continuous peak-native-memory profiler.
 - Full handshake byte counts include canonical protocol envelopes, both advertised policies/profiles, signatures, public keys, confirmations and ciphertext. They exclude WebSocket/TCP/IP framing.
-- The initiator advertises ephemeral keys for every supported KEM before the responder selects one. Consequently, a full handshake comparison includes that common capability-advertisement cost; it is not a pure selected-KEM key-generation comparison.
+- The initiator generates keys only for KEMs admitted by its own policy. The benchmark restricts each run to the KEM under test.
 - `handshake_ms` and `message_roundtrip_ms` are direct protocol-computation measurements. `network_handshake_ms` measures the full handshake through a real loopback relay, including computation, serialization and socket scheduling. It is not pure transmission time.
 - `network_message_roundtrip_ms` starts after the first message is encrypted. It includes outbound delivery, peer decryption, reply encryption, return delivery and reply decryption. The initial encryption is measured separately. `relay_transport_roundtrip_ms` measures a fixed 4096-character opaque payload and routing envelopes without cryptographic work; its payload differs from a chat packet, so subtracting it does not isolate exact protocol overhead.
 - Loopback timings do not establish LAN or WAN behavior. Browser-to-local-client HTTP latency is not measured by these protocol benchmarks. Client dashboard handshake timers observe their respective local intervals; responder and initiator timers do not start at exactly the same point.

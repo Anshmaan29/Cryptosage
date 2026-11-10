@@ -13,10 +13,10 @@ from typing import Any
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM, ChaCha20Poly1305
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-KEMS = ("ML-KEM-768", "HQC-3")
+KEMS = ("ML-KEM-512", "ML-KEM-768", "ML-KEM-1024", "HQC-1", "HQC-3", "HQC-5")
 SIGNATURE = "ML-DSA-65"
 
 
@@ -69,7 +69,7 @@ def _kem(name: str, secret: bytes | None = None) -> Any:
 
 
 def available_algorithms() -> list[dict[str, Any]]:
-    """Report enabled level-3 algorithms only, using actual library identifiers."""
+    """Report enabled KEMs and their levels from the native library."""
     oqs = _oqs()
     result = []
     for name in KEMS:
@@ -85,10 +85,12 @@ def available_algorithms() -> list[dict[str, Any]]:
                     "secret_key_bytes": d["length_secret_key"],
                     "ciphertext_bytes": d["length_ciphertext"],
                     "shared_secret_bytes": d["length_shared_secret"],
-                    "status": "recommended" if name == "ML-KEM-768" else "experimental",
+                    "status": "experimental"
+                    if name.startswith("HQC-")
+                    else "recommended",
                     "implementation_version": d["version"],
                     "standardization": "FIPS 203"
-                    if name == "ML-KEM-768"
+                    if name.startswith("ML-KEM-")
                     else "Selected for future standardization; 2025-08-22 specification",
                 }
             )
@@ -161,23 +163,38 @@ def hkdf(
     )
 
 
-def encrypt(key: bytes, nonce: bytes, plaintext: bytes, aad: bytes) -> bytes:
-    _bytes(key, "AES-256 key", 32)
-    _bytes(nonce, "GCM nonce", 12)
+AEADS: dict[str, type[AESGCM] | type[ChaCha20Poly1305]] = {
+    "AES-256-GCM": AESGCM,
+    "ChaCha20-Poly1305": ChaCha20Poly1305,
+}
+DEFAULT_AEAD = "AES-256-GCM"
+
+
+def encrypt(
+    key: bytes, nonce: bytes, plaintext: bytes, aad: bytes, *, aead: str = DEFAULT_AEAD
+) -> bytes:
+    _bytes(key, "AEAD key", 32)
+    _bytes(nonce, "AEAD nonce", 12)
     _bytes(plaintext, "plaintext")
     _bytes(aad, "associated data")
-    return AESGCM(key).encrypt(nonce, plaintext, aad)
+    if aead not in AEADS:
+        raise CryptoError("unsupported AEAD")
+    return AEADS[aead](key).encrypt(nonce, plaintext, aad)
 
 
-def decrypt(key: bytes, nonce: bytes, ciphertext: bytes, aad: bytes) -> bytes:
-    _bytes(key, "AES-256 key", 32)
-    _bytes(nonce, "GCM nonce", 12)
+def decrypt(
+    key: bytes, nonce: bytes, ciphertext: bytes, aad: bytes, *, aead: str = DEFAULT_AEAD
+) -> bytes:
+    _bytes(key, "AEAD key", 32)
+    _bytes(nonce, "AEAD nonce", 12)
+    if aead not in AEADS:
+        raise CryptoError("unsupported AEAD")
     _bytes(ciphertext, "ciphertext")
     _bytes(aad, "associated data")
     if len(ciphertext) < 16:
         raise CryptoError("invalid AEAD ciphertext length")
     try:
-        return AESGCM(key).decrypt(nonce, ciphertext, aad)
+        return AEADS[aead](key).decrypt(nonce, ciphertext, aad)
     except InvalidTag as exc:
         raise CryptoError("ciphertext integrity verification failed") from exc
 

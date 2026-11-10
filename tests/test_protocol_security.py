@@ -340,7 +340,9 @@ def test_hqc_handshake_requires_explicit_policy_agility(peers):
     alice, bob = peers
     for peer in (alice, bob):
         peer.policy["allow_experimental"] = True
-        peer.policy["algorithms"]["ML-KEM-768"]["status"] = "prohibited"
+        for name, rule in peer.policy["algorithms"].items():
+            if name != "HQC-3":
+                rule["status"] = "prohibited"
     complete_handshake(alice, bob)
     assert alice.session.algorithm == bob.session.algorithm == "HQC-3"
     assert "experimental" in alice.session.reason
@@ -378,3 +380,106 @@ def test_duplicate_response_before_ack_is_replay_not_internal_error():
         ack = bob.receive(finish)
         alice.receive(ack)
         assert alice.session and bob.session
+
+
+def test_initiator_advertises_and_generates_keys_only_for_admissible_kems(peers):
+    alice, _ = peers
+    offer = alice.initiate("Bob")
+    assert "ML-KEM-768" in offer["kem_keys"]
+    assert "HQC-3" not in offer["kem_keys"]
+    assert set(offer["kem_keys"]) == set(offer["offer"]["algorithms"])
+    alice.pending = None
+    alice.policy["allow_experimental"] = True
+    opted_in = alice.initiate("Bob")
+    assert "HQC-3" in opted_in["kem_keys"]
+    assert set(opted_in["kem_keys"]) == set(opted_in["offer"]["algorithms"])
+
+
+def test_simultaneous_initiation_keeps_the_smaller_identity_offer(peers):
+    alice, bob = peers
+    first, second = alice.initiate("Bob"), bob.initiate("Alice")
+    assert alice.receive(second) is None
+    response = bob.receive(first)
+    finish = alice.receive(response)
+    ack = bob.receive(finish)
+    assert alice.receive(ack) is None
+    assert alice.session.session_id == bob.session.session_id == first["sid"]
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "hybrid"),
+    [
+        ("off", "off", False),
+        ("off", "preferred", False),
+        ("preferred", "off", False),
+        ("preferred", "preferred", True),
+        ("required", "preferred", True),
+        ("preferred", "required", True),
+        ("required", "required", True),
+        ("required", "off", None),
+        ("off", "required", None),
+    ],
+)
+def test_x25519_policy_matrix(peers, left, right, hybrid):
+    alice, bob = peers
+    alice.policy = {**alice.policy, "hybrid_x25519": left}
+    bob.policy = {**bob.policy, "hybrid_x25519": right}
+    if hybrid is None:
+        with pytest.raises(ValueError, match="X25519 hybrid is required"):
+            complete_handshake(alice, bob)
+        assert alice.session is bob.session is None
+        return
+    complete_handshake(alice, bob)
+    assert alice.session.hybrid is bob.session.hybrid is hybrid
+    assert (" + X25519" in alice.session.public()["suite"]) is hybrid
+    assert (
+        bob.session.open(alice.session.seal("hybrid policy check"))
+        == "hybrid policy check"
+    )
+
+
+@pytest.mark.parametrize("replacement", [None, b64(bytes(range(32)))])
+def test_x25519_is_covered_by_offer_signature(peers, replacement):
+    alice, bob = peers
+    offer = alice.initiate("Bob")
+    with pytest.raises(ValueError, match="Invalid negotiation signature"):
+        bob.receive({**offer, "x25519": replacement})
+    assert bob.pending is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"), [("hybrid", False), ("aead", "ChaCha20-Poly1305")]
+)
+def test_signed_selection_must_match_negotiation(peers, field, value):
+    alice, bob = peers
+    response = bob.receive(alice.initiate("Bob"))
+    with pytest.raises(ValueError, match="Invalid negotiation signature"):
+        alice.receive({**response, field: value})
+    with pytest.raises(ValueError, match="Negotiation transcript mismatch"):
+        alice.receive(resign(bob.identity, {**response, field: value}))
+    assert alice.session is bob.session is None
+
+
+@pytest.mark.parametrize(
+    ("preferred", "other"),
+    [("AES-256-GCM", "ChaCha20-Poly1305"), ("ChaCha20-Poly1305", "AES-256-GCM")],
+)
+def test_aead_preferences_bind_cipher_to_message(peers, preferred, other):
+    alice, bob = peers
+    alice.policy = {**alice.policy, "aead": [preferred, other]}
+    bob.policy = {**bob.policy, "aead": [other, preferred]}
+    complete_handshake(alice, bob)
+    packet = alice.session.seal("selected cipher")
+    assert alice.session.aead == bob.session.aead == packet["aead"] == preferred
+    with pytest.raises(ValueError, match="Malformed encrypted message"):
+        bob.session.open({**packet, "aead": other})
+    assert bob.session.open(packet) == "selected cipher"
+
+
+def test_disjoint_aead_policy_refuses_handshake(peers):
+    alice, bob = peers
+    alice.policy = {**alice.policy, "aead": ["AES-256-GCM"]}
+    bob.policy = {**bob.policy, "aead": ["ChaCha20-Poly1305"]}
+    with pytest.raises(ValueError, match="No mutually acceptable AEAD"):
+        complete_handshake(alice, bob)
+    assert alice.session is bob.session is None

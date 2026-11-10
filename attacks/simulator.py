@@ -16,10 +16,17 @@ from crypto.primitives import signature_keypair, sign
 from policy.engine import load_policy
 from protocol.identity import Identity, b64, canonical, unb64
 from protocol.session import Peer, complete_handshake
+from server.relay import verify_registration
 from attacks.mutations import SCENARIOS, mutate_packet
 
 # SCENARIOS remains the V1 five-item public compatibility interface.
 CATALOG = [
+    {
+        "id": "relay_name_squatting",
+        "name": "Relay name squatting",
+        "objective": "Replace a routing name already registered by its original key.",
+        "mutation": "A second identity signs a registration for the same name with a different key.",
+    },
     {
         "id": "downgrade",
         "name": "Algorithm downgrade",
@@ -36,7 +43,7 @@ CATALOG = [
         "id": "modified_selected",
         "name": "Modified selected algorithm",
         "objective": "Make the two clients accept different negotiation outcomes.",
-        "mutation": "The relay changes the selected identifier after the responder signs it.",
+        "mutation": "The controlled responder changes and re-signs the selected KEM, exercising deterministic selection after signature verification.",
     },
     {
         "id": "identity",
@@ -96,9 +103,9 @@ CATALOG = [
 ALL_SCENARIOS = tuple(row["id"] for row in CATALOG)
 _BY_ID = {row["id"]: row for row in CATALOG}
 _EXPECTED = {
-    "downgrade": ("signature", "Policy violation"),
+    "downgrade": ("Invalid negotiation signature",),
     "modified_offers": ("signature",),
-    "modified_selected": ("signature", "Policy violation"),
+    "modified_selected": ("Policy violation: selected algorithm differs",),
     "identity": ("fingerprint",),
     "invalid_signature": ("signature",),
     "tamper": ("integrity",),
@@ -114,8 +121,8 @@ _EXPECTED = {
 def make_pair():
     """Create temporary real identities with explicit, out-of-band test pins."""
     with TemporaryDirectory(prefix="crytosage-lab-") as folder:
-        alice = Identity(Path(folder) / "alice", "Alice")
-        bob = Identity(Path(folder) / "bob", "Bob")
+        alice = Identity(Path(folder) / "alice", "Alice", storage_backend="filesystem")
+        bob = Identity(Path(folder) / "bob", "Bob", storage_backend="filesystem")
         alice.pin("Bob", bob.public, bob.fingerprint)
         bob.pin("Alice", alice.public, alice.fingerprint)
         yield Peer(alice, deepcopy(load_policy())), Peer(bob, deepcopy(load_policy()))
@@ -125,7 +132,13 @@ def _prepare(scenario: str, alice: Peer, bob: Peer) -> Callable[[], object]:
     """Build a real modified packet before the validator-under-test is invoked."""
     if scenario in ("downgrade", "modified_selected"):
         response = bob.receive(alice.initiate("Bob"))
+        if response is None:
+            raise RuntimeError("Baseline handshake produced no response")
         packet = mutate_packet("downgrade", response)
+        if scenario == "modified_selected":
+            packet["signature"] = bob.identity.sign(
+                {k: v for k, v in packet.items() if k != "signature"}
+            )
         return lambda: alice.receive(packet)
     if scenario == "modified_offers":
         packet = mutate_packet("downgrade", alice.initiate("Bob"))
@@ -164,16 +177,19 @@ def _prepare(scenario: str, alice: Peer, bob: Peer) -> Callable[[], object]:
         )
         return lambda: bob.receive(packet)
     complete_handshake(alice, bob)
-    packet = alice.session.seal("A real encrypted lab message")
+    sending, receiving = alice.session, bob.session
+    if sending is None or receiving is None:
+        raise RuntimeError("Baseline handshake produced no session")
+    packet = sending.seal("A real encrypted lab message")
     if scenario == "replay":
-        bob.session.open(packet)
-        return lambda: bob.session.open(packet)
+        receiving.open(packet)
+        return lambda: receiving.open(packet)
     if scenario == "tamper":
         packet = mutate_packet(scenario, packet)
-        return lambda: bob.session.open(packet)
+        return lambda: receiving.open(packet)
     if scenario == "reorder":
-        later = alice.session.seal("This real message must not skip an earlier counter")
-        return lambda: bob.session.open(later)
+        later = sending.seal("This real message must not skip an earlier counter")
+        return lambda: receiving.open(later)
     raise ValueError("Unsupported lab attack scenario")
 
 
@@ -190,8 +206,7 @@ async def _interrupted_rekey(record: Callable[[str, str], None]) -> str:
     async def route(socket):
         name = None
         try:
-            hello = json.loads(await asyncio.wait_for(socket.recv(), 5))
-            name = hello["register"]
+            name, _, _ = await verify_registration(socket)
             clients[name] = socket
             await socket.send(json.dumps({"type": "registered", "name": name}))
             async for raw in socket:
@@ -222,10 +237,22 @@ async def _interrupted_rekey(record: Callable[[str, str], None]) -> str:
     with TemporaryDirectory(prefix="crytosage-rekey-lab-") as folder:
         root = Path(folder)
         async with serve(route, "127.0.0.1", 0, max_size=262_144) as relay:
-            port = relay.sockets[0].getsockname()[1]
+            port = next(iter(relay.sockets)).getsockname()[1]
             url = f"ws://127.0.0.1:{port}"
-            alice = Client("Alice", root / "Alice", root / "contacts", url)
-            bob = Client("Bob", root / "Bob", root / "contacts", url)
+            alice = Client(
+                "Alice",
+                root / "Alice",
+                root / "contacts",
+                url,
+                storage_backend="filesystem",
+            )
+            bob = Client(
+                "Bob",
+                root / "Bob",
+                root / "contacts",
+                url,
+                storage_backend="filesystem",
+            )
             alice.identity.pin("Bob", bob.identity.public, bob.identity.fingerprint)
             bob.identity.pin("Alice", alice.identity.public, alice.identity.fingerprint)
             tasks = [asyncio.create_task(client.run()) for client in (alice, bob)]
@@ -240,6 +267,8 @@ async def _interrupted_rekey(record: Callable[[str, str], None]) -> str:
                     "baseline",
                     "Two isolated real Python clients completed a baseline authenticated session over loopback WebSockets.",
                 )
+                if alice.peer.session is None:
+                    raise RuntimeError("Baseline client session is missing")
                 old_sid = alice.peer.session.session_id
                 armed = True
                 record(
@@ -286,6 +315,71 @@ async def _interrupted_rekey(record: Callable[[str, str], None]) -> str:
                 await asyncio.gather(*tasks, return_exceptions=True)
 
 
+async def _relay_name_squatting(record: Callable[[str, str], None]) -> str:
+    """Check the real relay's first-seen binding on an ephemeral loopback port."""
+    from websockets.asyncio.client import connect
+    from websockets.exceptions import ConnectionClosed
+    from protocol.registration import register_client
+    from server.relay import run
+
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    with TemporaryDirectory(prefix="crytosage-registration-lab-") as folder:
+        original = Identity(
+            Path(folder) / "original", "Bob", storage_backend="filesystem"
+        )
+        replacement = Identity(
+            Path(folder) / "replacement", "Bob", storage_backend="filesystem"
+        )
+        relay = asyncio.create_task(run(port=port))
+        url = f"ws://127.0.0.1:{port}"
+        try:
+            async with asyncio.timeout(5):
+                while True:
+                    try:
+                        first = await connect(url, proxy=None)
+                        break
+                    except OSError:
+                        if relay.done():
+                            await relay
+                        await asyncio.sleep(0.01)
+            async with first:
+                await register_client(first, original)
+            record(
+                "baseline",
+                "The original identity registered its signed public key on the loopback relay.",
+            )
+            record(
+                "packet_mutated",
+                "A different identity presented its own signed registration for Bob.",
+            )
+            async with connect(url, proxy=None) as second:
+                record(
+                    "packet_received",
+                    "The relay received the second registration for Bob.",
+                )
+                try:
+                    await register_client(second, replacement)
+                except ConnectionClosed as exc:
+                    if (
+                        exc.rcvd is None
+                        or exc.rcvd.reason != "Routing identity key changed"
+                    ):
+                        raise
+                    record(
+                        "validation_failed",
+                        "The relay rejected the changed first-seen public key.",
+                    )
+                    return "Relay rejected the changed routing identity key"
+                raise AssertionError("The relay accepted a replacement key")
+        finally:
+            relay.cancel()
+            await asyncio.gather(relay, return_exceptions=True)
+
+
 def run_scenario(scenario: str) -> dict:
     """Run an isolated experiment; infrastructure failures are never attack success."""
     if scenario not in _BY_ID:
@@ -312,7 +406,16 @@ def run_scenario(scenario: str) -> dict:
         "An isolated experiment was requested; active conversations are not a target.",
     )
     try:
-        if scenario == "rekey_interruption":
+        if scenario == "relay_name_squatting":
+            reason = asyncio.run(_relay_name_squatting(record))
+            attempted = True
+            blocked = True
+            status = "blocked"
+            record(
+                "protected",
+                "The first registered key retained the routing name until relay restart.",
+            )
+        elif scenario == "rekey_interruption":
             attempted = True
             reason = asyncio.run(_interrupted_rekey(record))
             blocked = True
@@ -351,6 +454,8 @@ def run_scenario(scenario: str) -> dict:
                     record("accepted", reason)
     except Exception as exc:
         blocked = False
+        if scenario in ("rekey_interruption", "relay_name_squatting"):
+            attempted = any(event["phase"] == "packet_received" for event in timeline)
         status = "infrastructure_error"
         # Setup/transport/assertion failures are not cryptographic rejection and
         # arbitrary exception payloads are deliberately not exported to the UI.
@@ -366,11 +471,26 @@ def run_scenario(scenario: str) -> dict:
         "status": status,
         "reason": reason,
         "security_reason": reason,
+        "validation": {
+            "relay_name_squatting": "First-seen relay registration key binding",
+            "downgrade": "ML-DSA-65 signature",
+            "modified_offers": "ML-DSA-65 signature",
+            "modified_selected": "Deterministic policy selection",
+            "identity": "Pinned identity fingerprint",
+            "invalid_signature": "ML-DSA-65 signature",
+            "tamper": "AES-256-GCM authentication",
+            "replay": "Consumed receive counter",
+            "handshake_replay": "Handshake replay cache",
+            "unsupported": "KEM capability whitelist",
+            "invalid": "KEM public-key length",
+            "reorder": "Expected receive counter",
+            "rekey_interruption": "Disconnect cleanup and stale-session send guard",
+        }[scenario],
         "protocol_response": reason,
         "elapsed_ms": (time.perf_counter_ns() - start) / 1e6,
         "timeline": timeline,
         "scope": "isolated real local WebSocket clients"
-        if scenario == "rekey_interruption"
+        if scenario in ("rekey_interruption", "relay_name_squatting")
         else "isolated real client/protocol experiment; active conversation unchanged",
     }
 

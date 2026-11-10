@@ -25,9 +25,13 @@ def main() -> int:
             errors.append(f"{command} is required for source installation")
     for package in (
         "fastapi",
+        "starlette",
+        "defusedxml",
+        "uvicorn",
         "websockets",
         "cryptography",
         "psutil",
+        "segno",
         "pandas",
         "matplotlib",
         "pytest",
@@ -38,7 +42,7 @@ def main() -> int:
             errors.append(f"{package} is not installed")
     try:
         from crypto.primitives import (
-            available_algorithms,
+            KEMS,
             decapsulate,
             encapsulate,
             kem_keypair,
@@ -49,7 +53,9 @@ def main() -> int:
         )
 
         print("Cryptographic versions:", versions())
-        capabilities = available_algorithms()
+        from policy.engine import installed_algorithms
+
+        capabilities = installed_algorithms().values()
         for algorithm in capabilities:
             name = algorithm["name"]
             public, secret = kem_keypair(name)
@@ -59,9 +65,9 @@ def main() -> int:
             print(
                 f"{name}: real roundtrip passed; level {algorithm['security_level']}; {algorithm['status']}"
             )
-        if {a["name"] for a in capabilities} != {"ML-KEM-768", "HQC-3"}:
+        if {a["name"] for a in capabilities} != set(KEMS):
             errors.append(
-                "Required level-3 KEM capability missing; run scripts/setup_crypto.sh"
+                "Required KEM capability missing; run scripts/setup_crypto.sh"
             )
         public, secret = signature_keypair()
         if not verify(

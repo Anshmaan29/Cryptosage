@@ -11,6 +11,7 @@ export PATH="$ROOT/.venv/bin:$PATH"
 export PIP_CACHE_DIR="$ROOT/.build/pip-cache"
 export OQS_INSTALL_PATH="$ROOT/.local"
 mkdir -p "$ROOT/.build"
+python -m pip install 'pip==26.3'
 python -m pip install 'cmake==4.4.4' 'ninja==1.13.2' 'cryptography==50.0.2'
 
 checkout_release() {
@@ -31,21 +32,23 @@ checkout_release liboqs 0.16.0 5a1a854b0dc9f2141bdc771c555ee60c37950183 "$ROOT/.
 checkout_release liboqs-python 0.16.0.2 64c76ad0a80d6c69f2003219eb27b253782a3d68 "$ROOT/.build/liboqs-python"
 cmake -S "$ROOT/.build/liboqs" -B "$ROOT/.build/liboqs-build" -GNinja \
   -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DOQS_BUILD_ONLY_LIB=ON \
-  '-DOQS_MINIMAL_BUILD=KEM_ml_kem_768;KEM_hqc_3;SIG_ml_dsa_65' \
+  '-DOQS_MINIMAL_BUILD=KEM_ml_kem_512;KEM_ml_kem_768;KEM_ml_kem_1024;KEM_hqc_1;KEM_hqc_3;KEM_hqc_5;SIG_ml_dsa_65' \
   -DOQS_DIST_BUILD=ON -DOQS_USE_OPENSSL=OFF -DCMAKE_INSTALL_PREFIX="$ROOT/.local"
 cmake --build "$ROOT/.build/liboqs-build" --parallel "${BUILD_JOBS:-4}"
 cmake --install "$ROOT/.build/liboqs-build"
 python -m pip install "$ROOT/.build/liboqs-python"
 cd "$ROOT"
 python - <<'PY'
-from crypto.primitives import available_algorithms, kem_keypair, encapsulate, decapsulate, signature_keypair, sign, verify, versions
-assert {a['name'] for a in available_algorithms()} == {'ML-KEM-768', 'HQC-3'}
-for a in available_algorithms():
+from crypto.primitives import KEMS, kem_keypair, encapsulate, decapsulate, signature_keypair, sign, verify, versions
+from policy.engine import installed_algorithms
+capabilities = installed_algorithms()
+assert set(capabilities) == set(KEMS)
+for a in capabilities.values():
     public, secret = kem_keypair(a['name'])
     ciphertext, shared = encapsulate(a['name'], public)
     assert decapsulate(a['name'], secret, ciphertext) == shared
 public, secret = signature_keypair()
 assert verify(public, b'setup check', sign(secret, b'setup check'))
 print(versions())
-print('Verified real ML-KEM-768, HQC-3, and ML-DSA-65 operations.')
+print('Verified real operations for all configured KEMs and ML-DSA-65.')
 PY

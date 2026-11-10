@@ -15,10 +15,11 @@ from protocol.identity import Identity, b64
 
 
 @pytest.fixture
-def local_client(tmp_path):
+def local_client(tmp_path, monkeypatch):
+    monkeypatch.setenv("CRYTOSAGE_REPORT_DIR", str(tmp_path / "reports"))
     bob = Identity(tmp_path / "Bob", "Bob")
     contacts = tmp_path / "contacts"
-    contacts.mkdir()
+    contacts.mkdir(mode=0o700)
     (contacts / "Bob.json").write_text(
         json.dumps({"name": "Bob", "public": b64(bob.public)})
     )
@@ -286,9 +287,24 @@ def test_relay_dependency_graph_has_no_private_crypto_operations():
             elif isinstance(node, ast.ImportFrom) and node.module:
                 imports = [node.module]
             for imported in imports:
-                assert imported.split(".")[0] not in forbidden_roots, (
-                    f"{module} imports {imported}"
+                public_registration = (
+                    module == "server.relay"
+                    and isinstance(node, ast.ImportFrom)
+                    and {alias.name for alias in node.names}
+                    <= {
+                        "crypto.primitives": {"verify"},
+                        "protocol.identity": {
+                            "b64",
+                            "unb64",
+                            "fingerprint",
+                            "valid_name",
+                        },
+                        "protocol.registration": {"registration_payload"},
+                    }.get(imported, set())
                 )
+                assert (
+                    public_registration or imported.split(".")[0] not in forbidden_roots
+                ), f"{module} imports {imported}"
                 if imported.split(".")[0] in {"server", "attacks"}:
                     queue.append(imported)
             if isinstance(node, ast.Call):
@@ -375,3 +391,142 @@ def test_reset_cannot_relax_policy_without_confirmation(local_client):
     )
     assert accepted.status_code == 200
     assert local.peer.policy["minimum_security_level"] == 3
+
+
+def test_chunked_mutation_is_bounded_before_handler(local_client):
+    client, local, _, _ = local_client
+    response = client.post(
+        "/api/message",
+        headers={**auth(client), "Content-Type": "application/json"},
+        content=iter([b"x" * 40_000, b"x" * 40_000]),
+    )
+    assert response.status_code == 413
+    assert not local.messages
+
+
+def test_validation_error_does_not_echo_message_payload(local_client):
+    client, _, _, _ = local_client
+    private = "This text must not appear in validation reports"
+    response = client.post("/api/message", json={"text": private}, headers=auth(client))
+    assert response.status_code == 422
+    assert private not in response.text
+
+
+def test_retry_and_rekey_without_an_authenticated_session(local_client):
+    client, local, _, _ = local_client
+    headers = auth(client)
+    retry = client.post("/api/message/unknown/retry", json={}, headers=headers)
+    rekey = client.post("/api/rekey", json={}, headers=headers)
+    assert retry.status_code == rekey.status_code == 400
+    assert "authenticate" in retry.json()["detail"]
+    assert "No session" in rekey.json()["detail"]
+    assert not local.messages
+
+
+def test_invalid_benchmark_profile_is_rejected(local_client):
+    client, local, _, _ = local_client
+    response = client.post(
+        "/api/benchmark", json={"profile": "wan"}, headers=auth(client)
+    )
+    assert response.status_code == 422
+    assert not local.benchmark_busy
+
+
+def test_security_lab_returns_observed_attack_and_unavailable_report(local_client):
+    client, local, _, _ = local_client
+    assert client.get("/api/attacks").status_code == 200
+    assert client.get("/api/export/security.html").status_code == 404
+    headers = auth(client)
+    invalid = client.post("/api/attack", json={"scenario": "unknown"}, headers=headers)
+    assert invalid.status_code == 400
+    attack = client.post("/api/attack", json={"scenario": "tamper"}, headers=headers)
+    assert attack.status_code == 200
+    assert attack.json()["status"] == "blocked"
+    assert attack.json()["validation"] == "AES-256-GCM authentication"
+    report = client.get("/api/report").json()
+    assert report["test_report_status"] == "not_run"
+    assert report["prototype"] is True and report["attacks"] == local.attack_results
+
+
+def test_benchmark_api_records_and_exports_real_results(local_client):
+    client, local, _, _ = local_client
+    assert client.get("/api/benchmarks").json()["status"] == "not_run"
+    headers = auth(client)
+    conflict = client.post(
+        "/api/benchmark", json={"profile": "localhost", "delay_ms": 4}, headers=headers
+    )
+    assert conflict.status_code == 400 and not local.benchmark_busy
+    result = client.post(
+        "/api/benchmark", json={"profile": "localhost", "trials": 2}, headers=headers
+    )
+    assert result.status_code == 200 and not local.benchmark_busy
+    data = result.json()
+    assert data["metadata"]["configuration"]["network_profile"] == "localhost"
+    assert {item["name"] for item in data["algorithms"]} == {"HQC-3", "ML-KEM-768"}
+    assert all(
+        item["statistics"]["network_handshake_ms"]["n"] == 2
+        for item in data["algorithms"]
+    )
+    assert client.get("/api/benchmarks").json() == data
+    assert client.get("/api/export/benchmarks.json").json() == data
+    assert client.get("/api/export/benchmarks.zip").status_code == 200
+
+
+def test_public_contact_card_json_and_qr_export(local_client):
+    client, local, _, _ = local_client
+    response = client.get("/api/contact-card.json")
+    assert response.status_code == 200
+    assert response.json() == {
+        "name": "Alice",
+        "public": b64(local.identity.public),
+        "fingerprint": local.identity.fingerprint,
+    }
+    assert response.headers["content-disposition"].startswith("attachment")
+    response = client.get("/api/contact-card.svg")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/svg+xml"
+    assert b"<svg" in response.content and b"<path" in response.content
+
+
+def test_contact_card_import_rejects_bad_fingerprint_and_never_pins(local_client):
+    client, local, bob, tmp_path = local_client
+    card = {"name": "Robert", "public": b64(bob.public), "fingerprint": bob.fingerprint}
+    path = tmp_path / "contacts" / "Robert.json"
+    assert client.post("/api/contacts", json=card).status_code == 403
+    assert (
+        client.post(
+            "/api/contacts",
+            json={**card, "fingerprint": "a" * 64},
+            headers=auth(client),
+        ).status_code
+        == 400
+    )
+    assert not path.exists()
+    assert (
+        client.post("/api/contacts", json=card, headers=auth(client)).status_code == 200
+    )
+    assert path.stat().st_mode & 0o077 == 0
+    assert "Robert" not in local.identity.trusted
+    assert not next(row for row in local.contacts() if row["name"] == "Robert")[
+        "verified"
+    ]
+    assert (
+        client.post(
+            "/api/trust",
+            json={"peer": "Robert", "fingerprint": bob.fingerprint},
+            headers=auth(client),
+        ).status_code
+        == 200
+    )
+    assert local.identity.trusted["Robert"] == bob.fingerprint
+
+
+@pytest.mark.parametrize("address", ["192.168.1.4", "10.2.3.4", "172.16.31.42"])
+def test_lan_client_relay_requires_opt_in(address):
+    from client.app import local_relay_url
+
+    url = f"ws://{address}:8765"
+    assert not local_relay_url(url)
+    assert local_relay_url(url, lan=True)
+    assert not local_relay_url("ws://8.8.8.8:8765", lan=True)
+    assert not local_relay_url(f"ws://user@{address}:8765", lan=True)

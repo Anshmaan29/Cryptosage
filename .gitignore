@@ -12,3 +12,14 @@ __pycache__/
 .hallmark/
 
 .coverage
+.ruff_cache/
+reports/benchmarks-Alice/
+reports/benchmarks/
+reports/benchmarks-v2/
+reports/screenshots/
+reports/coverage.xml
+reports/tests.xml
+reports/attack-results*.json
+reports/security-tests.json
+reports/**/*.zip
+reports/*.zip

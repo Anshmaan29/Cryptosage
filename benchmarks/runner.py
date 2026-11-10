@@ -14,6 +14,7 @@ import platform
 import resource
 import statistics
 import sys
+import subprocess
 import time
 import tracemalloc
 from datetime import datetime, timezone
@@ -74,14 +75,27 @@ def run(
         row["name"]: row for row in available_algorithms() if row.get("available", True)
     }
     process = psutil.Process()
-    try:
-        cpu_description = next(
-            line.split(":", 1)[1].strip()
-            for line in Path("/proc/cpuinfo").read_text().splitlines()
-            if line.startswith("model name")
-        )
-    except (OSError, StopIteration):
-        cpu_description = platform.processor() or "unavailable"
+    machine_details = {}
+    if sys.platform == "darwin":
+        for field, key in (
+            ("model_identifier", "hw.model"),
+            ("processor", "machdep.cpu.brand_string"),
+            ("macos_version", "kern.osproductversion"),
+            ("macos_build", "kern.osversion"),
+        ):
+            machine_details[field] = subprocess.check_output(
+                ["/usr/sbin/sysctl", "-n", key], text=True
+            ).strip()
+        cpu_description = machine_details["processor"]
+    else:
+        try:
+            cpu_description = next(
+                line.split(":", 1)[1].strip()
+                for line in Path("/proc/cpuinfo").read_text().splitlines()
+                if line.startswith("model name")
+            )
+        except (OSError, StopIteration):
+            cpu_description = platform.processor() or "unavailable"
     cloud_marker = Path("/etc/codex/network-policy.json").is_file()
     environment = {
         "kind": "managed_cloud" if cloud_marker else "local_or_unclassified",
@@ -105,6 +119,7 @@ def run(
             "os": platform.platform(),
             "machine": platform.machine(),
             "processor": cpu_description,
+            "machine_details": machine_details,
             "cpu_count": os.cpu_count(),
             "total_memory_bytes": psutil.virtual_memory().total,
             "libraries": versions(),
@@ -207,7 +222,7 @@ def run(
             if handshake_factory:
                 handshake = handshake_factory(name)
                 measured = _validate_handshake_metrics(handshake)
-                if measured.keys() != warmup_metrics.keys():
+                if warmup_metrics is None or measured.keys() != warmup_metrics.keys():
                     raise ValueError(
                         "Handshake metric availability changed between warm-up and measured trials"
                     )
@@ -256,6 +271,10 @@ METRICS = (
     "message_roundtrip_ms",
     "encrypt_ms",
     "decrypt_ms",
+    "aes_256_gcm_encrypt_ms",
+    "aes_256_gcm_decrypt_ms",
+    "chacha20_poly1305_encrypt_ms",
+    "chacha20_poly1305_decrypt_ms",
     "network_handshake_ms",
     "network_message_roundtrip_ms",
     "relay_transport_roundtrip_ms",

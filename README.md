@@ -1,112 +1,108 @@
-# Crytosage
+# Cryptosage
 
-**Policy-Driven Post-Quantum Secure Messaging System with Automated Security Evaluation**
+Cryptosage is a B.Tech research prototype for policy-driven post-quantum messaging. Local clients authenticate pinned ML-DSA identities, negotiate a permitted KEM and optional X25519 contribution, and exchange authenticated encrypted messages through a relay. A security lab and benchmark reports expose the protocol's behavior for examination.
 
-Crytosage is a B.Tech research prototype for one-to-one messaging. Two local Python clients authenticate each other, negotiate a permitted post-quantum KEM, and exchange AES-256-GCM ciphertext through a separate WebSocket relay. A browser interface presents conversations, contact verification, protocol events, controlled attack experiments, and real benchmarks.
+## Problem statement
 
-The custom protocol is for study and testing. It has not received a formal security proof or independent cryptographic review and must not be used for sensitive communications.
+Harvest-now-decrypt-later attacks make the confidentiality lifetime of recorded traffic relevant before large quantum computers exist. Cryptographic agility lets a system change algorithms as standards and evidence evolve. This prototype studies those concerns using explicit policies and recorded experiments.
 
-## What runs
+## Features
 
-| Component | Implementation |
-| --- | --- |
-| Local clients | Python 3.12+, FastAPI, HTML/CSS/JavaScript |
-| Relay | Separate Python `websockets` process; routes encrypted envelopes |
-| Identity signatures | ML-DSA-65; persistent local identity and SHA-256 fingerprint pins |
-| Default KEM | ML-KEM-768, NIST security level 3 |
-| Experimental KEM | HQC-3, the level-3 identifier in the pinned liboqs 0.16.0 build |
-| Message protection | AES-256-GCM, HKDF-SHA-256, separate directional hash chains |
-| Evaluation | pytest, controlled packet mutations, repeated trials, JSON/CSV and matplotlib charts |
+- Real liboqs KEMs and ML-DSA signatures, with experimental HQC requiring both policies to opt in.
+- Signed negotiation, optional X25519 hybrid key agreement, negotiated AES-256-GCM or ChaCha20-Poly1305, directional ratchets and authenticated delivery receipts.
+- Contact fingerprint pinning, encrypted local history, Keychain-backed storage on supported macOS profiles, and explicit recovery behavior.
+- A local security lab, loopback relay observer, LAN demonstration mode and measured benchmarks.
 
-HQC-3 follows the implementation's 2025-08-22 specification. This build does not expose the older HQC-192 identifier. HQC is selected for future standardization; this project's HQC implementation remains experimental. The default policy excludes it from sessions. There is no substitute KEM or mock encryption when an implementation is unavailable.
+## Architecture
 
-## Install on Linux or macOS
+```mermaid
+flowchart LR
+  A[Alice browser] --> AC[Alice local client]
+  AC -->|signed packets and ciphertext| R[Untrusted relay]
+  R --> BC[Bob local client]
+  BC --> B[Bob browser]
+  AC --- AK[Identity and pins]
+  BC --- BK[Identity and pins]
+  R --> O[Loopback observer]
+```
 
-Use Python 3.12 or newer, Git, and a working C compiler. On macOS, install the Xcode Command Line Tools with `xcode-select --install`. On Linux, install your distribution's Python venv support and C build tools if absent. The setup script installs pinned CMake and Ninja into the project virtual environment and builds only the required liboqs algorithms.
+```mermaid
+sequenceDiagram
+  participant A as Alice
+  participant R as Relay
+  participant B as Bob
+  A->>R: Signed offer and ephemeral public keys
+  R->>B: Offer
+  B->>R: Signed response, KEM ciphertext, confirmation
+  R->>A: Response
+  A->>R: Initiator confirmation
+  R->>B: Finish
+  B->>R: Responder acknowledgement
+  R->>A: Ack
+```
 
-From the repository root:
+The relay sees routing metadata, public handshake fields and ciphertext. It verifies a public signature during registration and retains a first-seen key fingerprint for each name until restart. See [architecture](docs/ARCHITECTURE.md) and [security](docs/SECURITY.md).
+
+## Screenshots
+
+![Conversation](docs/images/conversation.png)
+![Identity verification](docs/images/verify-dialog.png)
+![Selection inspector](docs/images/selection-inspector.png)
+![Policy manager](docs/images/policy-manager.png)
+![Attack lab](docs/images/attack-result.png)
+![Benchmarks](docs/images/benchmarks.png)
+![Relay observer](docs/images/relay-observer.png)
+![Light appearance](docs/images/light.png)
+![Dark appearance](docs/images/dark.png)
+
+## Quick start
+
+On macOS or Linux install Python 3.12 or later, Git and a C compiler, then run:
 
 ```sh
-bash scripts/setup_crypto.sh
-.venv/bin/python -m pip install -r requirements.txt
+./scripts/setup.sh
+./scripts/run_demo.sh
 ```
 
-If `python3` points to an older Python, select the intended interpreter explicitly:
+Open the printed Alice and Bob URLs. Compare the fingerprints through a trusted channel and pin them before connecting. Stop the launcher with Ctrl-C or `./scripts/stop_demo.sh`. The launcher also prints a loopback relay observer URL.
 
-```sh
-PYTHON=python3.12 bash scripts/setup_crypto.sh
-```
+On Windows use WSL2 Ubuntu with the same commands. This path is documented, not tested. For separate machines see [the two-laptop guide](docs/TWO-LAPTOP-DEMO.md).
 
-An exact Python package snapshot from the validated Linux environment is in `requirements-lock.txt` (liboqs bindings are installed separately by `setup_crypto.sh`). Use it after the native setup when reproducing that dependency set.
+The separate [browser edition](https://crytosage.anshmaansingh.workers.dev/) runs cryptography in each browser and uses Cloudflare to route encrypted packets. It has a separate protocol and trust model described in [browser documentation](docs/BROWSER-DEMO.md).
 
-The native library is installed under `.local/`; its pinned official source and build cache are under `.build/`. No system-wide liboqs install is required. The script verifies exact source revisions and exercises real KEM and signature operations. The cryptographic build disables OpenSSL dependency use, so OpenSSL development headers are not a prerequisite.
+## Recorded results
 
-Linux x86-64 was used for current validation. macOS and Apple Silicon use the same source-build path, but this repository's reports do not establish that they were tested.
+Measurements are from the recorded Apple M4 localhost run. The experiment includes both hybrid negotiation and actual loopback relay traffic. The computational handshake and network handshake are separate measurements.
 
-## Run the demonstration
+| KEM | Public key bytes | Ciphertext bytes | Local handshake median / P95 ms | Loopback handshake median / P95 ms | Handshake bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| ML-KEM-768 | 1184 | 1088 | 0.906 / 1.010 | 2.583 / 2.813 | 19346 |
+| HQC-3 | 4514 | 8978 | 11.557 / 12.096 | 13.824 / 14.373 | 34286 |
 
-```sh
-bash scripts/run_demo.sh
-```
+Source: [localhost/results.json](reports/final/localhost/results.json). The before-change handshake bytes are unavailable in the final evidence; no same-conditions comparison is claimed.
 
-The launcher initializes persistent test identities, starts the relay on port 8765, and starts Alice and Bob on ports 8001 and 8002. Open those two local client ports in your own browser. Keep the terminal running and use Ctrl+C to stop the processes it started.
+| KEM | AES-GCM encrypt / decrypt ms | ChaCha20-Poly1305 encrypt / decrypt ms |
+| --- | ---: | ---: |
+| ML-KEM-768 | 0.0105 / 0.0113 | 0.0120 / 0.0124 |
+| HQC-3 | 0.0108 / 0.0114 | 0.0125 / 0.0125 |
 
-Before the first conversation:
+Source: [localhost/results.json](reports/final/localhost/results.json). Medians include ratchet and serialization work.
 
-1. Open **Verify identity** on Alice's screen and on Bob's screen.
-2. Compare Alice's own fingerprint on Alice's screen with the Alice contact fingerprint on Bob's screen. Paste the independently checked value into Bob's verification input.
-3. Repeat the comparison for Bob, then pin Bob's fingerprint in Alice's client.
-4. On one client, select **Establish secure session**. Wait for both clients to report an authenticated session, then send messages in either direction.
+[Selection scenarios](reports/final/selection-scenarios.md) explain policy decisions. [Moderate](reports/final/moderate/results.json) and [constrained](reports/final/constrained/results.json) results use injected delay and bandwidth constraints. They are simulated network conditions.
 
-The local public-contact directory helps the demo discover identities. It does not confer trust. A signed key from an unknown contact is rejected until the fingerprint is explicitly pinned. In a real remote use case, compare fingerprints through a separate trusted channel.
+## Security and limitations
 
-To run components in separate terminals:
+Fingerprint comparison establishes contact trust. The signed transcript binds policy, ephemeral keys and the selected algorithms. Directional message keys advance after successful operations. The relay can deny service, expose metadata, and accept the first identity to claim an unregistered name. Ordered delivery rejects out-of-order packets, and delivery receipts attest to client storage rather than human reading. The native and browser protocols are distinct.
 
-```sh
-.venv/bin/python -m scripts.init_demo
-.venv/bin/python -m server.relay
-.venv/bin/python -m client.app --name Alice --port 8001
-.venv/bin/python -m client.app --name Bob --port 8002
-```
+The custom protocol has not received independent review or a formal proof. Endpoint compromise and Python secret erasure remain limitations. Multiple simultaneous conversations are future work.
 
-Each client can also use an independent `--data-dir`, `--contacts-dir`, and `--policy`. Clients bind only to loopback. Private operations and decrypted messages belong to the local client process, while the relay has routing metadata and ciphertext. The local browser is part of the trusted endpoint.
+## Project structure
 
-## Evaluate
+- `crypto/`, `protocol/`, `policy/` implement primitives, handshakes and selection.
+- `client/` and `server/` contain the local endpoint and relay.
+- `attacks/`, `benchmarks/`, `tests/` and `reports/final/` contain experiments and evidence.
+- `scripts/` and `docs/` contain launch tools and submission materials.
 
-```sh
-.venv/bin/python -m pytest
-.venv/bin/python -m scripts.evaluate
-.venv/bin/python -m scripts.benchmark --trials 30
-```
+## Team, license and references
 
-`pytest` executes the implementation's tests. `scripts.evaluate` creates a security report from the current run. `scripts.benchmark` measures both available level-3 KEMs, complete authenticated protocol computation, and separate loopback WebSocket exchanges, then writes real JSON, CSV, and charts. Review the commands' exit status and generated reports; an old report is not evidence that the current run passed.
-
-The **Security lab** in either client presents session state and events. Its attack experiments use fresh, isolated client pairs and real cryptographic operations. Their results do not mutate the current conversation. The benchmark action runs repeated trials and shows unavailable measurements explicitly. Detailed methodology and limitations are in [Evaluation](docs/EVALUATION.md).
-
-## Change the policy
-
-The default file is [`policy/policy.json`](policy/policy.json). Restart the affected clients after editing it, or start a client with `--policy path/to/policy.json`.
-
-Selection applies both policies and installed capabilities. It first rejects algorithms below either minimum level, prohibited algorithms, and experimental algorithms lacking both clients' opt-in. It then sorts by implementation/policy status, combined priority, comparable measured preference scores, and identifier. Security conditions outrank performance. See [Policy](docs/POLICY.md) for laboratory examples.
-
-## Source map
-
-```text
-client/       Local client process and browser interface
-server/       Untrusted WebSocket relay
-crypto/       Strict liboqs and cryptography adapters
-protocol/     Identity pins, signed handshake, directional ratchet
-policy/       JSON policy and deterministic selection
-attacks/      Controlled malicious-relay packet experiments
-benchmarks/   Measurements, aggregation, reports and graphs
-tests/        Primitive, policy, protocol, API and integration tests
-scripts/      Installation, demo launch, evaluation and benchmarks
-docs/         Architecture, threat model, demo and viva notes
-reports/      Actual evaluation outputs
-```
-
-Read the [V1 audit and V2 evidence](docs/AUDIT.md), [Architecture and protocol](docs/ARCHITECTURE.md), [Threat model and limitations](docs/SECURITY.md), [Demo and viva](docs/DEMO.md), and [Troubleshooting](docs/TROUBLESHOOTING.md).
-
-## Scope
-
-The project supports one-to-one text conversations and fresh authenticated sessions. Conversation history and identity files are encrypted at rest using AES-GCM. The default key is protected by local filesystem permissions; an optional passphrase offers stronger protection for copied storage. Live session and ratchet keys remain in memory and are discarded on reconnect. It has no group chat, file transfer, voice/video, multi-device synchronization, production certificate infrastructure, or optional X25519 hybrid mode. The hash ratchet is simpler than Signal's Double Ratchet. Python cannot guarantee erasure of every secret copy, and the default local master key relies on filesystem permissions; copying the entire directory or compromising the same account exposes it.
+Team names, roll numbers and ownership are placeholders in [CONTRIBUTORS.md](CONTRIBUTORS.md). The project uses the [MIT License](LICENSE). liboqs is third-party MIT-licensed software. References and the full research discussion appear in [the report](docs/REPORT.md).

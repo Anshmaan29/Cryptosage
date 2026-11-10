@@ -9,13 +9,24 @@ let eventSignature = '';
 let pending = new Set();
 let refreshing = false;
 let requestedSession = null;
-const descriptions = {
-  downgrade: 'Modify authenticated negotiation to try to force a different algorithm.',
-  identity: 'Substitute an identity key and check whether established contact trust rejects it.',
-  replay: 'Replay a previously accepted message and check the receiving message counter.',
-  tamper: 'Change ciphertext bytes and check authenticated decryption. Corrupted plaintext must never appear.',
-  invalid: 'Submit malformed protocol or cryptographic input and observe safe rejection.'
-};
+const messageEncoder = new TextEncoder();
+const messageLimit = 16384;
+let attackCatalog = [];
+
+function messageSize() { return messageEncoder.encode($('message-input').value.trim()).length; }
+
+function describeAttack() {
+  const selected = attackCatalog.find(row => row.id === $('attack-scenario').value);
+  setText('attack-explanation', selected ? [selected.objective, selected.mutation].filter(Boolean).join(' ') : '');
+  $('attack-button').disabled = !selected;
+}
+
+function warnPolicyLevel() {
+  const algorithms = state?.algorithms;
+  $('policy-level-warning').hidden = !algorithms || algorithms.some(
+    algorithm => algorithm.security_level >= Number($('policy-level').value)
+  );
+}
 
 function node(tag, className, text) {
   const el = document.createElement(tag);
@@ -92,7 +103,7 @@ function renderContacts() {
   setText('contact-count', contacts.length);
   const list = $('contact-list');
   list.replaceChildren();
-  if (!contacts.length) { list.append(node('p', 'loading-label', 'No contacts are available. Start the other local client.')); return; }
+  if (!contacts.length) { list.append(node('p', 'loading-label', 'No contacts yet. Import a contact card to get started.')); return; }
   for (const contact of contacts) {
     const button = node('button', 'contact-button' + (contact.name === selectedPeer ? ' selected' : ''));
     button.type = 'button';
@@ -107,19 +118,19 @@ function renderContacts() {
 }
 function renderStatus() {
   const contact = peer();
-  const session = hasSession() ? state.session : null;
+  const online = $('connection-warning').hidden && !!state.connected;
+  const session = online && hasSession() ? state.session : null;
   const trusted = !!contact?.verified;
-  const online = !$('connection-warning').hidden ? false : !!state.connected;
   setText('identity-name', state.identity?.name || 'Local identity');
   setText('identity-avatar', (state.identity?.name || '?').slice(0, 1).toUpperCase());
   setText('peer-name', contact?.name || 'Your next conversation');
   setText('peer-avatar', (contact?.name || '?').slice(0, 1).toUpperCase());
   setText('peer-status', contact?.identity_changed ? 'Identity changed: connection blocked' : session ? 'Authenticated encrypted session' : trusted ? 'Identity verified, ready to connect' : 'Identity not yet verified');
   $('verify-button').disabled = !contact || pending.has('trust');
-  setText('session-banner-text', session ? `End-to-end encrypted with ${session.algorithm}. Identity verified locally.` : trusted ? 'Identity verified. Establish a session to exchange encrypted messages.' : 'Verify your contact before establishing an encrypted session.');
+  setText('session-banner-text', session ? `End-to-end encrypted with ${session.suite} using ${session.aead}. Identity verified locally.` : trusted ? 'Identity verified. Establish a session to exchange encrypted messages.' : 'Verify your contact before establishing an encrypted session.');
   setText('session-state-label', session ? 'Secure session established' : 'Not connected');
   setText('session-state-description', session ? 'Authenticated negotiation completed. Only the local clients hold the message keys.' : 'An authenticated connection starts with a verified contact.');
-  setText('detail-algorithm', session?.algorithm || 'Not established');
+  setText('detail-algorithm', session?.suite || 'Not established');
   setText('detail-trust', trusted ? 'Verified fingerprint' : 'Not verified');
   setText('detail-relay', online ? 'Connected' : 'Disconnected');
   setText('detail-handshake', session?.handshake_ms != null ? `${formatNumber(session.handshake_ms)} ms` : 'Not measured');
@@ -130,11 +141,14 @@ function renderStatus() {
   $('start-button').disabled = !contact || !online || !!requestedSession || !!state.negotiating || pending.has('connect');
   $('start-button').firstChild.textContent = trusted ? 'Establish secure session' : 'Verify contact to begin';
   $('message-input').disabled = !session || !online || !!state.negotiating || pending.has('message');
-  $('send-button').disabled = !session || !online || !!state.negotiating || pending.has('message') || !$('message-input').value.trim();
+  const size = messageSize();
+  setText('message-bytes', `${size.toLocaleString()} / 16,384 bytes${size > messageLimit ? ' (over limit)' : ''}`);
+  $('send-button').disabled = !session || !online || !!state.negotiating || pending.has('message') || !size || size > messageLimit;
+  warnPolicyLevel();
   $('message-input').placeholder = session ? `Message ${contact?.name || 'your contact'}…` : 'Establish a session to write a message…';
   setText('composer-status', state.negotiating ? 'Waiting for authenticated peer confirmation' : session ? 'Encrypted locally; delivered means peer authenticated receipt' : online ? 'Reconnect securely before sending' : 'Relay offline; history remains on this client');
   setText('lab-session-status', session ? 'Authenticated session active' : 'No session established');
-  setText('lab-algorithm', session?.algorithm || 'Not established');
+  setText('lab-algorithm', session?.suite || 'Not established');
   setText('lab-security-level', session?.security_level ? `NIST level ${session.security_level}` : '—');
   setText('lab-handshake', session?.handshake_ms != null ? `${formatNumber(session.handshake_ms)} ms` : 'Not measured');
   setText('selection-reason', session?.reason || 'The policy engine will explain its decision after authenticated negotiation.');
@@ -164,7 +178,7 @@ function renderMessages() {
   const retained = new Set();
   let received = 0;
   for (const [index, message] of messages.entries()) {
-    const id = String(message.id || `${message.time}-${index}`);
+    const id = `${message.direction}:${message.id || `${message.time}-${index}`}`;
     retained.add(id);
     const sent = message.direction === 'sent';
     let item = existing.get(id);
@@ -177,7 +191,7 @@ function renderMessages() {
       if (!sent) received++;
     }
     const meta = item.querySelector('.message-meta');
-    const statusSignature = JSON.stringify([message.status, message.error]);
+    const statusSignature = JSON.stringify([message.status, message.error, message.retry_available, message.retry_ready]);
     if (meta.dataset.signature !== statusSignature) {
       meta.dataset.signature = statusSignature;
       meta.replaceChildren();
@@ -185,15 +199,16 @@ function renderMessages() {
       if (message.time) { timestamp.dateTime = message.time; timestamp.title = new Date(message.time).toLocaleString(); }
       meta.append(timestamp);
       if (sent) {
-        const labels = {pending:'Pending',sent:'Sent; awaiting peer receipt',delivered:'Delivered',failed:'Failed'};
+        const labels = {pending:'Pending',sent:'Sent to relay',delivered:'Delivered',unconfirmed:'Delivery unconfirmed',failed:'Failed'};
         const status = node('span', 'delivery-status status-' + (message.status || 'unknown'), labels[message.status] || 'Delivery unconfirmed');
         status.title = message.status === 'delivered' ? 'The peer authenticated and recorded this message. This is not a read receipt.' : message.error || '';
         meta.append(status);
-        if (message.status === 'failed' && message.id) {
-          const retry = node('button', 'retry-button', 'Resend (may duplicate)');
+        if (message.retry_available) {
+          const retry = node('button', 'retry-button', 'Retry delivery');
           retry.type = 'button';
-          retry.title = message.error || 'Resend in a fresh authenticated session; the recipient may already have received the original.';
-          retry.addEventListener('click', () => action('retry-' + id, retry, () => request('/api/message/' + encodeURIComponent(id) + '/retry', {})));
+          retry.disabled = !message.retry_ready;
+          retry.title = message.retry_ready ? 'Encrypt this message again in the fresh session.' : 'Establish a fresh session with this contact to retry.';
+          retry.addEventListener('click', () => action('retry-' + id, retry, () => request('/api/message/' + encodeURIComponent(message.id) + '/retry', {})));
           meta.append(retry);
         }
       }
@@ -212,8 +227,8 @@ function renderEvents() {
   list.replaceChildren();
   if (!events.length) { list.append(node('li', 'empty-table', 'No events recorded yet.')); return; }
   for (const event of events) {
-    const row = node('li', 'event-row');
-    row.append(node('time', '', formatTime(event.time || event.timestamp)), node('span', 'event-kind', humanLabel(event.kind || event.type || 'Event')), node('span', 'event-detail', typeof event.detail === 'object' ? JSON.stringify(event.detail) : event.detail || event.message || ''));
+    const row = node('li', event.kind === 'rejected' ? 'event-row event-rejected' : 'event-row');
+    row.append(node('time', '', formatTime(event.time || event.timestamp)), node('span', 'event-kind', event.kind === 'rejected' ? 'Packet rejected' : humanLabel(event.kind || event.type || 'Event')), node('span', 'event-detail', typeof event.detail === 'object' ? JSON.stringify(event.detail) : event.detail || event.message || ''));
     list.append(row);
   }
 }
@@ -299,7 +314,7 @@ function renderAttack(result) {
   output.append(node('h3', '', titles[status] || 'Result inconclusive.'));
   output.append(node('p', '', result.reason || result.detail || 'No protocol outcome was recorded.'));
   const details = node('dl', 'attack-facts');
-  for (const [label,value] of [['Objective',result.objective],['Mutation',result.mutation],['Observed response',result.protocol_response],['Execution time',result.elapsed_ms != null ? formatNumber(result.elapsed_ms,2)+' ms' : null]]) {
+  for (const [label,value] of [['Scope',result.scope],['Objective',result.objective],['Mutation',result.mutation],['Validation under test',result.validation],['Observed response',result.protocol_response],['Execution time',result.elapsed_ms != null ? formatNumber(result.elapsed_ms,2)+' ms' : null]]) {
     if (value) { details.append(node('dt','',label),node('dd','',typeof value === 'object' ? JSON.stringify(value) : value)); }
   }
   output.append(details);
@@ -332,6 +347,15 @@ function renderBenchmarks(data) {
   if (!data || !Object.keys(data).length || data.status === 'not_run') return;
   const output = $('benchmark-output');
   output.replaceChildren();
+  const config = data.metadata?.configuration;
+  if (config?.network_enabled) {
+    const profile = config.network_profile || 'custom';
+    const delay = config.injected_send_delay_ms || 0;
+    const bandwidth = config.simulated_bandwidth_bps;
+    output.append(node('p', 'benchmark-meta', delay || bandwidth
+      ? `${humanLabel(profile)} · ${delay} ms added per send${bandwidth ? ` · ${bandwidth / 1000} kb/s modeled payload rate` : ''}. Loopback with injected delay.`
+      : 'Localhost · Loopback WebSockets with no injected delay.'));
+  }
   if (typeof rememberBenchmark === 'function') rememberBenchmark(data);
   const results = Array.isArray(data) ? data : data.algorithms || data.results || data.benchmarks;
   if (!Array.isArray(results) && (typeof results !== 'object' || !results)) { output.append(node('pre', 'json-output', JSON.stringify(data, null, 2))); return; }
@@ -372,14 +396,37 @@ function renderBenchmarks(data) {
     ['handshake_ms','Handshake computation','ms'], ['network_handshake_ms','Loopback handshake','ms'],
     ['cpu_usage_percent','Process CPU utilization','%'], ['peak_rss_bytes','Sampled process memory','bytes'],
     ['handshake_bytes','Handshake bandwidth','bytes'], ['encrypt_ms','Message encryption','ms'],
-    ['decrypt_ms','Message decryption','ms'], ['rekey_ms','Fresh session re-key','ms']
+    ['decrypt_ms','Message decryption','ms'], ['aes_256_gcm_encrypt_ms','AES-GCM encryption','ms'],
+    ['aes_256_gcm_decrypt_ms','AES-GCM decryption','ms'], ['chacha20_poly1305_encrypt_ms','ChaCha20-Poly1305 encryption','ms'],
+    ['chacha20_poly1305_decrypt_ms','ChaCha20-Poly1305 decryption','ms'], ['rekey_ms','Fresh session re-key','ms']
   ]) {
-    const rows = results.map(entry => ({name:entry.name, value:entry.statistics?.[metric]?.mean})).filter(row => typeof row.value === 'number' && Number.isFinite(row.value));
+    const rows = entries.map(([name, entry]) => ({name, value:entry.statistics?.[metric]?.mean})).filter(row => typeof row.value === 'number' && Number.isFinite(row.value));
     if (!rows.length) continue;
     const chart = node('div','benchmark-chart'); chart.append(node('h3','',title));
     const maximum = Math.max(...rows.map(row => row.value), 0.00001);
     for (const row of rows) { const line = node('div','chart-row'); line.append(node('span','',row.name)); const track = node('div','chart-track'); const bar = node('div','chart-bar'); bar.style.width = (row.value / maximum * 100) + '%'; track.append(bar); line.append(track,node('span','chart-value',`${formatNumber(row.value, 3)} ${unit}`)); chart.append(line); }
     output.append(chart);
+  }
+  const distributions = node('div', 'benchmark-table-wrap');
+  const statsTable = node('table', 'data-table');
+  const statsHead = node('thead'); const statsHeaders = node('tr');
+  for (const label of ['Algorithm', 'Handshake stage', 'Samples', 'Mean', 'Median', 'Std. dev.', 'P95']) {
+    const th = node('th', '', label); th.scope = 'col'; statsHeaders.append(th);
+  }
+  statsHead.append(statsHeaders); statsTable.append(statsHead);
+  const statsBody = node('tbody');
+  for (const [name, entry] of entries) {
+    for (const [key, label] of [['handshake_ms', 'Protocol'], ['network_handshake_ms', 'WebSocket'], ['network_rekey_ms', 'WebSocket re-key']]) {
+      const stats = entry.statistics?.[key];
+      if (!stats) continue;
+      const row = node('tr');
+      for (const value of [name, label, stats.n, ...['mean', 'median', 'stdev', 'p95'].map(metric => `${formatNumber(stats[metric], 3)} ms`)]) row.append(node('td', '', value));
+      statsBody.append(row);
+    }
+  }
+  if (statsBody.children.length) {
+    statsTable.append(statsBody); distributions.append(statsTable);
+    output.append(node('h3', '', 'Handshake latency distribution'), distributions);
   }
   const meta = node('div', 'benchmark-meta');
   for (const [key, value] of Object.entries(data.environment || data.metadata || {})) meta.append(node('span', '', `${humanLabel(key)}: ${typeof value === 'object' ? JSON.stringify(value) : value}`));
@@ -415,7 +462,7 @@ $('copy-fingerprint').addEventListener('click', async () => {
 $('message-form').addEventListener('submit', (event) => {
   event.preventDefault();
   const text = $('message-input').value.trim();
-  if (!text || !hasSession()) return;
+  if (!text || !hasSession() || messageSize() > messageLimit) return;
   const binding = { peer: selectedPeer, session_id: state.session.session_id };
   action('message', $('send-button'), async () => { await request('/api/message', { text, ...binding }); $('message-input').value = ''; $('message-input').style.height = ''; }).then(() => { if (!$('message-input').disabled) $('message-input').focus(); });
 });
@@ -429,7 +476,7 @@ $('rekey-button').addEventListener('click', () => {
     notify('Fresh key negotiation requested. Waiting for peer confirmation.', true);
   });
 });
-$('attack-scenario').addEventListener('change', () => setText('attack-explanation', descriptions[$('attack-scenario').value]));
+$('attack-scenario').addEventListener('change', describeAttack);
 $('attack-form').addEventListener('submit', (event) => { event.preventDefault(); action('attack', $('attack-button'), async () => renderAttack(await request('/api/attack', { scenario: $('attack-scenario').value }))); });
 
 $('report-button').addEventListener('click', () => action('report', $('report-button'), async () => renderReport(await request('/api/report'))));
@@ -447,16 +494,27 @@ $('contacts-toggle').addEventListener('click', () => { const panel = $('contacts
 $('benchmark-trials').addEventListener('change', () => { $('custom-trials-wrap').hidden = $('benchmark-trials').value !== 'custom'; });
 $('benchmark-button').addEventListener('click', () => action('benchmark', $('benchmark-button'), async () => {
   const trials = Number($('benchmark-trials').value === 'custom' ? $('benchmark-custom').value : $('benchmark-trials').value);
+  $('benchmark-progress').hidden = false;
   setText('benchmark-progress', 'Measuring real operations; please wait…');
-  try { renderBenchmarks(await request('/api/benchmark', {trials, delay_ms:Number($('benchmark-delay').value)})); setText('benchmark-progress', 'Measurements completed.'); }
+  try { renderBenchmarks(await request('/api/benchmark', {trials, profile:$('benchmark-profile').value})); setText('benchmark-progress', 'Measurements completed.'); }
   catch (error) { setText('benchmark-progress', 'Benchmark did not complete.'); throw error; }
 }));
+const aeadPreferences = {
+  'aes-first': ['AES-256-GCM', 'ChaCha20-Poly1305'],
+  'chacha-first': ['ChaCha20-Poly1305', 'AES-256-GCM'],
+  'aes-only': ['AES-256-GCM'],
+  'chacha-only': ['ChaCha20-Poly1305']
+};
 let loadedPolicy = null;
 async function loadPolicy() {
   const data = await request('/api/policy'); loadedPolicy = data.policy;
   $('policy-level').value = loadedPolicy.minimum_security_level;
+  warnPolicyLevel();
   $('policy-performance').value = loadedPolicy.performance_preference;
   $('policy-rekey').value = loadedPolicy.rekey_interval || 100;
+  $('policy-hybrid').value = loadedPolicy.hybrid_x25519 || 'preferred';
+  const ciphers = loadedPolicy.aead || aeadPreferences['aes-first'];
+  $('policy-aead').value = Object.keys(aeadPreferences).find(key => aeadPreferences[key].join() === ciphers.join());
   $('policy-experimental').checked = loadedPolicy.allow_experimental;
   $('policy-json').textContent = JSON.stringify(loadedPolicy, null, 2);
   $('policy-algorithms').replaceChildren();
@@ -467,15 +525,45 @@ async function loadPolicy() {
   }
   setText('policy-status','Changes apply to new sessions.');
 }
+$('policy-level').addEventListener('change', warnPolicyLevel);
 $('policy-form').addEventListener('submit', (event) => { event.preventDefault(); action('policy', $('policy-save'), async () => {
   const policy = structuredClone(loadedPolicy); policy.minimum_security_level = Number($('policy-level').value);
   policy.performance_preference = $('policy-performance').value; policy.rekey_interval = Number($('policy-rekey').value);
+  policy.hybrid_x25519 = $('policy-hybrid').value;
+  policy.aead = aeadPreferences[$('policy-aead').value];
   policy.allow_experimental = $('policy-experimental').checked;
   document.querySelectorAll('[data-algorithm]').forEach((select) => { policy.algorithms[select.dataset.algorithm].status = select.value; });
   await request('/api/policy', {policy, confirm_restrictions:$('policy-confirm').checked}); await loadPolicy(); notify('Policy saved for future sessions.', true);
 }); });
 $('policy-reset').addEventListener('click', () => { if (!confirm('Restore defaults for future sessions? This may relax your current policy.')) return; action('policy-reset', $('policy-reset'), async () => { await request('/api/policy/reset', {confirm_restrictions:true}); await loadPolicy(); }); });
 $('protocol-refresh').addEventListener('click', refresh);
+$('contact-card-button').addEventListener('click', () => $('contact-card-dialog').showModal());
+$('close-contact-card').addEventListener('click', () => $('contact-card-dialog').close());
+$('contact-card-form').addEventListener('submit', event => {
+  event.preventDefault();
+  action('contact-card', $('contact-card-submit'), async () => {
+    const input = $('contact-card-file');
+    const formError = $('contact-card-error');
+    const file = input.files[0];
+    formError.hidden = true;
+    try {
+      const pasted = $('contact-card-json').value.trim();
+      if (!pasted && file?.size > 8192) throw new Error('Contact card files must be 8 KB or smaller.');
+      let card;
+      try { card = JSON.parse(pasted || await file?.text()); }
+      catch { throw new Error('Paste a valid contact card or choose a JSON file.'); }
+      const result = await request('/api/contacts', card);
+      await refresh();
+      selectedPeer = result.name; messageSignature = ''; render();
+      $('contact-card-form').reset();
+      $('contact-card-dialog').close();
+      notify('Contact card imported. Compare fingerprints before verifying.', true);
+    } catch (error) {
+      formError.textContent = error.message;
+      formError.hidden = false;
+    }
+  });
+});
 function renderV2() {
   const decision = state.session?.decision || state.selection_decision;
   const decisionOutput = $('selection-output'); decisionOutput.replaceChildren();
@@ -486,7 +574,7 @@ function renderV2() {
     for (const candidate of decision.candidates || []) { const section = node('section'); section.append(node('h3', '', `${candidate.name} · ${candidate.eligible ? 'Eligible' : 'Excluded'}`)); const checks = node('ul'); for (const check of candidate.checks || []) checks.append(node('li', '', `${check.passed ? 'Pass' : 'Not met'}: ${check.detail}`)); section.append(checks); decisionOutput.append(section); }
   } else decisionOutput.append(node('p', 'empty-table', 'Run a handshake to inspect the actual policy decision.'));
   const list = $('protocol-events'); list.replaceChildren();
-  for (const event of (state.events || []).slice().reverse()) list.append(node('li', '', `${formatTime(event.time)} · ${humanLabel(event.kind)} · ${event.detail}`));
+  for (const event of (state.events || []).slice().reverse()) list.append(node('li', event.kind === 'rejected' ? 'event-rejected' : '', `${formatTime(event.time)} · ${event.kind === 'rejected' ? 'Packet rejected' : humanLabel(event.kind)} · ${event.detail}`));
   if (!list.children.length) list.append(node('li', 'empty-table', 'No events recorded yet.'));
   const details = $('encryption-overview'); details.replaceChildren();
   if (state.session) details.append(node('p', '', `Session ${state.session.session_id.slice(0,12)} · ML-DSA-65 · re-key after ${state.session.rekey_interval} messages`));
@@ -502,6 +590,8 @@ function renderDemo() {
     ['Establish an authenticated session', '#messages', hasSession() ? 'Session established' : 'No active session'],
     ['Inspect the negotiated selection', '#selection', state.session?.decision ? 'Decision recorded' : 'Establish a session'],
     ['Exchange encrypted messages', '#messages', state.messages?.length ? 'Local history is available' : 'No messages yet'],
+    ['See what the relay received', 'http://127.0.0.1:8766/', 'Send “hello”, then check the relay view for its ciphertext preview'],
+    ['Live malicious relay', '#protocol', 'Start the local demo with --attack, then inspect rejected packets in this event history'],
     ['Inspect actual protocol events', '#protocol', state.events?.length ? 'Events recorded by this client' : 'No events recorded'],
     ['Run a downgrade experiment', '#attacks', (state.attack_results || []).some(r => r.scenario === 'downgrade') ? 'Experiment recorded in this process' : 'Not yet run'],
     ['Compare measured performance', '#benchmarks', state.benchmark_completed ? 'Measurements available' : 'Not yet run in this process'],
@@ -509,11 +599,26 @@ function renderDemo() {
     ['Export recorded reports', '#benchmarks', 'Download the available reports']
   ];
   const list = $('demo-steps'); list.replaceChildren();
-  for (const [label, href, status] of items) { const li = node('li'); const link = node('a', '', label); link.href = href; li.append(link, node('span', 'muted', ` — ${status}`)); list.append(li); }
+  for (const [label, href, status] of items) { const li = node('li'); const link = node('a', '', label); link.href = href; if (href.startsWith('http:')) { link.target = '_blank'; link.rel = 'noopener'; } li.append(link, node('span', 'muted', ` — ${status}`)); list.append(li); }
 }
 async function loadV2Route(routeName) {
   if (routeName === 'policy') { try { await loadPolicy(); } catch (error) { notify(error.message); } }
-  if (routeName === 'attacks') { try { const rows = await request('/api/attacks'); const select = $('attack-scenario'); const current = select.value; select.replaceChildren(); for (const row of rows) { const option = node('option', '', row.name); option.value = row.id; select.append(option); } select.value = current; } catch (error) { notify(error.message); } }
+  if (routeName === 'attacks') {
+    try {
+      attackCatalog = await request('/api/attacks');
+      const select = $('attack-scenario');
+      const previous = select.value;
+      select.replaceChildren();
+      for (const row of attackCatalog) {
+        const option = node('option', '', row.name);
+        option.value = row.id;
+        select.append(option);
+      }
+      select.disabled = !attackCatalog.length;
+      if (attackCatalog.some(row => row.id === previous)) select.value = previous;
+      describeAttack();
+    } catch (error) { notify(error.message); }
+  }
   if (routeName === 'demo') renderDemo();
 }
 window.addEventListener('hashchange', route);

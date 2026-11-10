@@ -50,20 +50,23 @@ def safety_number(public: bytes) -> str:
 
 
 class Identity:
-    def __init__(self, directory: Path, name: str):
+    def __init__(
+        self, directory: Path, name: str, *, storage_backend: str | None = None
+    ):
         self.name = valid_name(name)
         self.directory = Path(directory)
-        self._store = LocalStore(self.directory)
-        self.storage_protection = self._store.protection
+        self.store = LocalStore(self.directory, backend=storage_backend)
+        self.storage_protection = self.store.backend
         path = self.directory / "identity.json"
         migrate = False
+        new = False
         if path.exists() or path.is_symlink():
             try:
                 stored = json.loads(read_private(path))
             except json.JSONDecodeError as exc:
                 raise ValueError("Invalid stored identity") from exc
-            if self._store.is_envelope(stored):
-                data = self._store.read_secret(path, "identity")
+            if self.store.is_envelope(stored):
+                data = self.store.read_secret(path, "identity")
             else:
                 data, migrate = stored, True
             if not isinstance(data, dict) or set(data) != {"name", "public", "secret"}:
@@ -75,6 +78,17 @@ class Identity:
             if not verify(self.public, challenge, sign(self._secret, challenge)):
                 raise ValueError("Stored identity public and private keys do not match")
         else:
+            if any(
+                p.exists() or p.is_symlink()
+                for p in (
+                    self.directory / "trust.json",
+                    self.directory / "history.json",
+                )
+            ):
+                raise ValueError(
+                    "Local identity is missing; restore it before opening existing data"
+                )
+            new = True
             self.public, self._secret = signature_keypair()
             data = {
                 "name": name,
@@ -83,7 +97,7 @@ class Identity:
             }
             migrate = True
         if migrate:
-            self._store.write_secret(path, "identity", data)
+            self.store.write_secret(path, "identity", data, create_only=new)
         self.fingerprint = fingerprint(self.public)
         self.safety_number = safety_number(self.public)
         self.trust_path = self.directory / "trust.json"
@@ -102,8 +116,11 @@ class Identity:
             if not isinstance(pin, str) or not re.fullmatch(r"[0-9a-f]{64}", pin):
                 raise ValueError("Invalid stored contact fingerprint")
 
+    def sign_bytes(self, value: bytes) -> bytes:
+        return sign(self._secret, value)
+
     def sign(self, value: dict) -> str:
-        return b64(sign(self._secret, canonical(value)))
+        return b64(self.sign_bytes(canonical(value)))
 
     def pin(
         self,
@@ -126,8 +143,9 @@ class Identity:
                 raise ValueError(
                     "Identity changed; explicit replacement and previous fingerprint confirmation required"
                 )
-        self.trusted[name] = actual
-        private_write(self.trust_path, self.trusted)
+        updated = {**self.trusted, name: actual}
+        private_write(self.trust_path, updated)
+        self.trusted = updated
 
     def check_peer(self, name: str, public: bytes) -> None:
         valid_name(name)
