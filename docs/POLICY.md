@@ -43,3 +43,9 @@ Start both clients with their respective `--policy` file. This creates a new HQC
 To demonstrate refusal, prohibit ML-KEM-768 while leaving `allow_experimental` false, or require minimum level 4. The clients should reject establishment with a policy reason. Do not edit application code to make a prohibited session succeed.
 
 The engine selects among known implementations and configured rules. It does not discover unknown vulnerabilities or infer cryptographic safety from benchmark speed.
+
+## Native session protection
+
+The default hybrid setting is `preferred`. Both policies must permit X25519 to combine it with the selected post-quantum KEM. A `required` and `off` pairing refuses the session. An `off` setting preserves the post-quantum KEM and disables the extra classical exchange. The local Policy Manager asks for explicit confirmation before weakening the current hybrid requirement.
+
+Both peers advertise ordered AEAD preferences. The first option in the initiator’s list that the responder accepts is selected. The default lists AES-256-GCM first and ChaCha20-Poly1305 second. Sessions with no mutual AEAD are refused. Changes take effect on the next handshake.

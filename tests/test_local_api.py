@@ -19,7 +19,7 @@ def local_client(tmp_path, monkeypatch):
     monkeypatch.setenv("CRYTOSAGE_REPORT_DIR", str(tmp_path / "reports"))
     bob = Identity(tmp_path / "Bob", "Bob")
     contacts = tmp_path / "contacts"
-    contacts.mkdir()
+    contacts.mkdir(mode=0o700)
     (contacts / "Bob.json").write_text(
         json.dumps({"name": "Bob", "public": b64(bob.public)})
     )
@@ -470,3 +470,63 @@ def test_benchmark_api_records_and_exports_real_results(local_client):
     assert client.get("/api/benchmarks").json() == data
     assert client.get("/api/export/benchmarks.json").json() == data
     assert client.get("/api/export/benchmarks.zip").status_code == 200
+
+
+def test_public_contact_card_json_and_qr_export(local_client):
+    client, local, _, _ = local_client
+    response = client.get("/api/contact-card.json")
+    assert response.status_code == 200
+    assert response.json() == {
+        "name": "Alice",
+        "public": b64(local.identity.public),
+        "fingerprint": local.identity.fingerprint,
+    }
+    assert response.headers["content-disposition"].startswith("attachment")
+    response = client.get("/api/contact-card.svg")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/svg+xml"
+    assert b"<svg" in response.content and b"<path" in response.content
+
+
+def test_contact_card_import_rejects_bad_fingerprint_and_never_pins(local_client):
+    client, local, bob, tmp_path = local_client
+    card = {"name": "Robert", "public": b64(bob.public), "fingerprint": bob.fingerprint}
+    path = tmp_path / "contacts" / "Robert.json"
+    assert client.post("/api/contacts", json=card).status_code == 403
+    assert (
+        client.post(
+            "/api/contacts",
+            json={**card, "fingerprint": "a" * 64},
+            headers=auth(client),
+        ).status_code
+        == 400
+    )
+    assert not path.exists()
+    assert (
+        client.post("/api/contacts", json=card, headers=auth(client)).status_code == 200
+    )
+    assert path.stat().st_mode & 0o077 == 0
+    assert "Robert" not in local.identity.trusted
+    assert not next(row for row in local.contacts() if row["name"] == "Robert")[
+        "verified"
+    ]
+    assert (
+        client.post(
+            "/api/trust",
+            json={"peer": "Robert", "fingerprint": bob.fingerprint},
+            headers=auth(client),
+        ).status_code
+        == 200
+    )
+    assert local.identity.trusted["Robert"] == bob.fingerprint
+
+
+@pytest.mark.parametrize("address", ["192.168.1.4", "10.2.3.4", "172.16.31.42"])
+def test_lan_client_relay_requires_opt_in(address):
+    from client.app import local_relay_url
+
+    url = f"ws://{address}:8765"
+    assert not local_relay_url(url)
+    assert local_relay_url(url, lan=True)
+    assert not local_relay_url("ws://8.8.8.8:8765", lan=True)
+    assert not local_relay_url(f"ws://user@{address}:8765", lan=True)

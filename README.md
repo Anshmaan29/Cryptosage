@@ -2,7 +2,7 @@
 
 **Policy-Driven Post-Quantum Secure Messaging System with Automated Security Evaluation**
 
-Crytosage is a B.Tech research prototype for one-to-one messaging. Two local Python clients authenticate each other, negotiate a permitted post-quantum KEM, and exchange AES-256-GCM ciphertext through a separate WebSocket relay. A browser interface presents conversations, contact verification, protocol events, controlled attack experiments, and real benchmarks.
+Crytosage is a B.Tech research prototype for one-to-one messaging. Two local Python clients authenticate each other, negotiate a permitted post-quantum KEM and optional X25519, and exchange authenticated ciphertext through a separate WebSocket relay. A browser interface presents conversations, contact verification, protocol events, controlled attack experiments, and real benchmarks.
 
 The custom protocol is for study and testing. It has not received a formal security proof or independent cryptographic review and must not be used for sensitive communications.
 
@@ -18,8 +18,9 @@ Open [Crytosage](https://crytosage.anshmaansingh.workers.dev/) in a modern brows
 | Relay | Separate Python `websockets` process; routes encrypted envelopes |
 | Identity signatures | ML-DSA-65; persistent local identity and SHA-256 fingerprint pins |
 | Default KEM | ML-KEM-768, NIST security level 3 |
-| Experimental KEM | HQC-3, the level-3 identifier in the pinned liboqs 0.16.0 build |
-| Message protection | AES-256-GCM, HKDF-SHA-256, separate directional hash chains |
+| Other native KEMs | ML-KEM-512 and ML-KEM-1024. HQC-1, HQC-3 and HQC-5 are experimental. |
+| Hybrid mode | Ephemeral X25519 combined with the selected KEM when both policies permit it |
+| Message protection | Negotiated AES-256-GCM or ChaCha20-Poly1305, HKDF-SHA-256, separate directional hash chains |
 | Evaluation | pytest, controlled packet mutations, repeated trials, JSON/CSV and matplotlib charts |
 
 HQC-3 follows the implementation's 2025-08-22 specification. This build does not expose the older HQC-192 identifier. HQC is selected for future standardization; this project's HQC implementation remains experimental. The default policy excludes it from sessions. There is no substitute KEM or mock encryption when an implementation is unavailable.
@@ -119,3 +120,5 @@ Read the [V1 audit and V2 evidence](docs/AUDIT.md), [Architecture and protocol](
 ## Scope
 
 The project supports one-to-one text conversations and fresh authenticated sessions. Conversation history and identity files are encrypted at rest using AES-GCM. New macOS profiles keep the storage key in Keychain. Passphrase and filesystem modes are available for fresh profiles. Live session and ratchet keys remain in memory and are discarded on reconnect. It has no group chat, file transfer, voice/video, multi-device synchronization, production certificate infrastructure, or optional X25519 hybrid mode. The hash ratchet is simpler than Signal's Double Ratchet. Python cannot guarantee erasure of every secret copy. Filesystem-backed profiles and retained migration keys require separate protection.
+
+[Two-laptop LAN demo and contact cards](docs/TWO-LAPTOP-DEMO.md)

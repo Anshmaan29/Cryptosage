@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.asymmetric.x25519 import (
+    X25519PrivateKey,
+    X25519PublicKey,
+)
 import hashlib
 import hmac
 import secrets
@@ -9,6 +13,7 @@ import time
 from copy import deepcopy
 from dataclasses import dataclass, field
 from crypto.primitives import (
+    DEFAULT_AEAD,
     kem_keypair,
     encapsulate,
     decapsulate,
@@ -20,7 +25,7 @@ from crypto.primitives import (
 from protocol.identity import Identity, b64, unb64, canonical
 from policy.engine import admissible_algorithms, installed_algorithms, select
 
-VERSION = "crytosage/2"
+VERSION = "crytosage/3"
 MAX_MESSAGE = 16_384
 REKEY_AFTER = 100
 SESSION_LIFETIME = 3600
@@ -42,6 +47,31 @@ def check_mac(key: bytes, label: bytes, transcript: bytes, supplied: str) -> Non
         raise ValueError("Shared-key confirmation failed")
 
 
+def x25519_public(body: dict) -> X25519PublicKey | None:
+    value = body["x25519"]
+    if body["offer"]["policy"].get("hybrid_x25519", "preferred") == "off":
+        if value is not None:
+            raise ValueError("Unexpected X25519 key with hybrid disabled")
+        return None
+    return X25519PublicKey.from_public_bytes(unb64(value))
+
+
+def combine_secrets(
+    shared: bytes,
+    private: X25519PrivateKey | None,
+    public: X25519PublicKey | None,
+    transcript: bytes,
+    hybrid: bool,
+) -> bytes:
+    if not hybrid:
+        return shared
+    if private is None or public is None:
+        raise ValueError("Negotiated hybrid session requires both X25519 keys")
+    return hkdf(
+        shared + private.exchange(public), b"crytosage/2/hybrid", salt=transcript
+    )
+
+
 @dataclass
 class Session:
     session_id: str
@@ -60,6 +90,8 @@ class Session:
     rekey_interval: int = REKEY_AFTER
     decision: dict = field(default_factory=dict)
     security_level: int = 0
+    hybrid: bool = False
+    aead: str = DEFAULT_AEAD
     _issue_receipt_key: bytes = field(default=b"", repr=False)
     _verify_receipt_key: bytes = field(default=b"", repr=False)
     expires_at: float = field(
@@ -87,6 +119,8 @@ class Session:
             rekey_interval=selection.get("rekey_interval", REKEY_AFTER),
             decision=deepcopy(selection.get("decision", {})),
             security_level=selection["security_level"],
+            hybrid=selection["hybrid"],
+            aead=selection["aead"],
             _issue_receipt_key=hkdf(
                 root,
                 b"crytosage/2/responder-delivery"
@@ -120,10 +154,13 @@ class Session:
             "from": self.local,
             "to": self.peer,
             "counter": self.send_count,
+            "aead": self.aead,
         }
         key = hkdf(self._send_chain, b"crytosage/2/message-key")
         nonce = self.send_count.to_bytes(12, "big")
-        ciphertext = encrypt(key, nonce, message_id + text.encode(), canonical(header))
+        ciphertext = encrypt(
+            key, nonce, message_id + text.encode(), canonical(header), aead=self.aead
+        )
         self._send_chain = hkdf(self._send_chain, b"crytosage/2/next-chain")
         self.send_count += 1
         self.encryption_us = (time.perf_counter_ns() - start) / 1000
@@ -136,11 +173,21 @@ class Session:
         if time.monotonic() >= self.expires_at:
             raise ValueError("Session expired; establish a fresh session")
         start = time.perf_counter_ns()
-        expected_keys = {"type", "v", "sid", "from", "to", "counter", "ciphertext"}
+        expected_keys = {
+            "type",
+            "v",
+            "sid",
+            "from",
+            "to",
+            "counter",
+            "ciphertext",
+            "aead",
+        }
         if (
             set(packet) != expected_keys
             or packet["v"] != VERSION
             or packet["type"] != "message"
+            or packet["aead"] != self.aead
         ):
             raise ValueError("Malformed encrypted message")
         if (
@@ -169,7 +216,11 @@ class Session:
         key = hkdf(self._receive_chain, b"crytosage/2/message-key")
         try:
             plaintext = decrypt(
-                key, counter.to_bytes(12, "big"), ciphertext, canonical(header)
+                key,
+                counter.to_bytes(12, "big"),
+                ciphertext,
+                canonical(header),
+                aead=self.aead,
             )
             text = plaintext[MESSAGE_ID_BYTES:].decode("utf-8")
         except (ValueError, UnicodeDecodeError, InvalidTag) as exc:
@@ -221,6 +272,9 @@ class Session:
             "session_id": self.session_id,
             "peer": self.peer,
             "algorithm": self.algorithm,
+            "suite": f"{self.algorithm} + X25519" if self.hybrid else self.algorithm,
+            "hybrid": self.hybrid,
+            "aead": self.aead,
             "security_level": self.security_level,
             "reason": self.reason,
             "decision": self.decision,
@@ -290,6 +344,11 @@ class Peer:
         self.last_decision = result.get("decision")
         return result
 
+    def _x25519_key(self) -> X25519PrivateKey | None:
+        if self.policy.get("hybrid_x25519", "preferred") == "off":
+            return None
+        return X25519PrivateKey.generate()
+
     def _signed(self, body: dict) -> dict:
         return {**body, "signature": self.identity.sign(body)}
 
@@ -326,6 +385,7 @@ class Peer:
         started = time.perf_counter_ns()
         offer = self._offer()
         keys = {name: kem_keypair(name) for name in offer["algorithms"]}
+        private = self._x25519_key()
         if not keys:
             raise ValueError("No supported post-quantum KEM is available")
         body = {
@@ -339,12 +399,14 @@ class Peer:
             "time": int(time.time()),
             "offer": offer,
             "kem_keys": {name: b64(pair[0]) for name, pair in keys.items()},
+            "x25519": b64(private.public_key().public_bytes_raw()) if private else None,
         }
         packet = self._signed(body)
         self.pending = {
             "role": "initiator",
             "offer": body,
             "keys": keys,
+            "x25519": private,
             "start": started,
             "expires": time.monotonic() + 30,
         }
@@ -385,6 +447,7 @@ class Peer:
                 "time",
                 "offer",
                 "kem_keys",
+                "x25519",
             }:
                 raise ValueError("Malformed handshake offer")
             if type(body["time"]) is not int or abs(time.time() - body["time"]) > 60:
@@ -416,6 +479,8 @@ class Peer:
             local_offer = self._offer()
             selection = self._select(body["offer"], local_offer)
             algorithm = selection["algorithm"]
+            public = x25519_public(body)
+            private = self._x25519_key()
             if not isinstance(body["kem_keys"], dict) or set(body["kem_keys"]) != set(
                 body["offer"]["algorithms"]
             ):
@@ -434,9 +499,17 @@ class Peer:
                 "offer_hash": b64(digest(body)),
                 "offer": local_offer,
                 "selected": algorithm,
+                "x25519": b64(private.public_key().public_bytes_raw())
+                if private
+                else None,
+                "hybrid": selection["hybrid"],
+                "aead": selection["aead"],
                 "ciphertext": b64(ciphertext),
             }
             transcript = digest({"offer": body, "response": response})
+            shared = combine_secrets(
+                shared, private, public, transcript, selection["hybrid"]
+            )
             confirm_key = hkdf(shared, b"crytosage/2/confirmation", salt=transcript)
             response["confirmation"] = mac(confirm_key, b"responder", transcript)
             self.pending = {
@@ -473,6 +546,9 @@ class Peer:
                 "offer_hash",
                 "offer",
                 "selected",
+                "x25519",
+                "hybrid",
+                "aead",
                 "ciphertext",
                 "confirmation",
             }:
@@ -492,12 +568,23 @@ class Peer:
                 raise ValueError(
                     "Policy violation: selected algorithm differs from deterministic negotiation"
                 )
+            if (
+                body["hybrid"] is not selection["hybrid"]
+                or body["aead"] != selection["aead"]
+            ):
+                raise ValueError(
+                    "Negotiation transcript mismatch: unexpected hybrid mode or AEAD"
+                )
+            public = x25519_public(body)
             raw = {k: v for k, v in body.items() if k != "confirmation"}
             transcript = digest({"offer": p["offer"], "response": raw})
             shared = decapsulate(
                 selection["algorithm"],
                 p["keys"][selection["algorithm"]][1],
                 unb64(body["ciphertext"]),
+            )
+            shared = combine_secrets(
+                shared, p["x25519"], public, transcript, selection["hybrid"]
             )
             key = hkdf(shared, b"crytosage/2/confirmation", salt=transcript)
             check_mac(key, b"responder", transcript, body["confirmation"])
@@ -508,6 +595,7 @@ class Peer:
                 selection=selection,
             )
             p.pop("keys")
+            p.pop("x25519")
             return {
                 "type": "finish",
                 "v": VERSION,

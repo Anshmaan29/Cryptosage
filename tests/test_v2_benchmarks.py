@@ -60,6 +60,10 @@ def test_full_callback_has_unrecorded_warmup_and_real_rekey():
         assert algorithm["statistics"]["handshake_ms"]["mean"] > 0
         assert algorithm["statistics"]["handshake_bytes"]["min"] > 0
         assert "network_handshake_ms" not in algorithm["statistics"]
+        for cipher in ("aes_256_gcm", "chacha20_poly1305"):
+            for operation in ("encrypt", "decrypt"):
+                metric = algorithm["statistics"][f"{cipher}_{operation}_ms"]
+                assert metric["n"] == 2 and metric["min"] > 0
     assert result["metadata"]["protocol_warmups_per_algorithm"] == 1
     assert result["metadata"]["configuration"]["network_enabled"] is False
     assert result["metadata"]["environment"]["kind"] in {

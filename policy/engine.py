@@ -7,7 +7,7 @@ import math
 from pathlib import Path
 from typing import Any, TypeGuard
 
-from crypto.primitives import available_algorithms
+from crypto.primitives import AEADS, available_algorithms
 
 
 class PolicyError(ValueError):
@@ -60,6 +60,16 @@ def validate_policy(policy: Any) -> dict[str, Any]:
     interval = policy.get("rekey_interval", 100)
     if type(interval) is not int or not 1 <= interval <= 100:
         raise PolicyError("Re-key interval must be an integer from 1 to 100 messages")
+    if policy.get("hybrid_x25519", "preferred") not in ("off", "preferred", "required"):
+        raise PolicyError("Invalid X25519 hybrid policy")
+    aead = policy.get("aead", list(AEADS))
+    if (
+        not isinstance(aead, list)
+        or not 1 <= len(aead) <= len(AEADS)
+        or any(not isinstance(name, str) or name not in AEADS for name in aead)
+        or len(set(aead)) != len(aead)
+    ):
+        raise PolicyError("Invalid AEAD preference list")
     rules = policy.get("algorithms")
     if not isinstance(rules, dict) or not rules or len(rules) > 16:
         raise PolicyError("Policy must contain algorithm rules")
@@ -121,7 +131,7 @@ def select(
     peer_offer: dict[str, Any],
     measurements: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Choose symmetrically; performance can never override policy admissibility.
+    """Choose the KEM symmetrically and the AEAD in initiator preference order.
 
     Untrusted peers cannot assert availability: only this process's actual library
     capabilities and the two signed policies decide eligibility. Measurements are
@@ -248,6 +258,25 @@ def select(
             ]
         )
         raise PolicyError(message, decision)
+    modes = (
+        left.get("hybrid_x25519", "preferred"),
+        right.get("hybrid_x25519", "preferred"),
+    )
+    hybrid = "off" not in modes
+    aead = next(
+        (name for name in left.get("aead", AEADS) if name in right.get("aead", AEADS)),
+        None,
+    )
+    refusal = (
+        "X25519 hybrid is required by one client and disabled by the other"
+        if not hybrid and "required" in modes
+        else "No mutually acceptable AEAD"
+        if aead is None
+        else None
+    )
+    if refusal:
+        steps.append({"stage": "selection", "detail": refusal})
+        raise PolicyError(refusal, decision)
     rank = min((experimental, priority) for _, experimental, priority in candidates)
     ranked = [
         name
@@ -330,8 +359,9 @@ def select(
         measured = "not used: only one eligible candidate"
     else:
         measured = "policy status/priority determined selection before performance"
+    suite = f"{chosen} + X25519" if hybrid else chosen
     reason = (
-        f"{chosen}: both clients permit security level {installed[chosen]['security_level']} (minimum {minimum}); "
+        f"{suite} with {aead}: both clients permit security level {installed[chosen]['security_level']} (minimum {minimum}); "
         f"{'experimental, explicitly allowed by both' if chosen_experimental else 'recommended'}; "
         f"combined policy priority {priority}; performance: {measured}."
     )
@@ -343,7 +373,7 @@ def select(
         "used_for_tiebreak": performance_used,
         "detail": measured,
     }
-    decision["selected"] = chosen
+    decision.update(selected=chosen, suite=suite, hybrid=hybrid, aead=aead)
     steps.extend(
         [
             {"stage": "performance", "detail": measured},
@@ -352,6 +382,9 @@ def select(
     )
     return {
         "algorithm": chosen,
+        "suite": suite,
+        "hybrid": hybrid,
+        "aead": aead,
         "security_level": installed[chosen]["security_level"],
         "reason": reason,
         "rekey_interval": interval,

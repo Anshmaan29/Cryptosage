@@ -204,8 +204,13 @@ def _plots(report, output_dir):
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.8), layout="constrained")
     bars(
         axes[0],
-        ["encrypt_ms", "decrypt_ms"],
-        ["Encryption", "Decryption"],
+        [
+            "aes_256_gcm_encrypt_ms",
+            "aes_256_gcm_decrypt_ms",
+            "chacha20_poly1305_encrypt_ms",
+            "chacha20_poly1305_decrypt_ms",
+        ],
+        ["AES encrypt", "AES decrypt", "ChaCha encrypt", "ChaCha decrypt"],
         "Mean latency (ms)",
         "Message AEAD + ratchet computation",
     )

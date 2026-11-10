@@ -13,7 +13,7 @@ from typing import Any
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM, ChaCha20Poly1305
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 KEMS = ("ML-KEM-512", "ML-KEM-768", "ML-KEM-1024", "HQC-1", "HQC-3", "HQC-5")
@@ -163,23 +163,38 @@ def hkdf(
     )
 
 
-def encrypt(key: bytes, nonce: bytes, plaintext: bytes, aad: bytes) -> bytes:
-    _bytes(key, "AES-256 key", 32)
-    _bytes(nonce, "GCM nonce", 12)
+AEADS: dict[str, type[AESGCM] | type[ChaCha20Poly1305]] = {
+    "AES-256-GCM": AESGCM,
+    "ChaCha20-Poly1305": ChaCha20Poly1305,
+}
+DEFAULT_AEAD = "AES-256-GCM"
+
+
+def encrypt(
+    key: bytes, nonce: bytes, plaintext: bytes, aad: bytes, *, aead: str = DEFAULT_AEAD
+) -> bytes:
+    _bytes(key, "AEAD key", 32)
+    _bytes(nonce, "AEAD nonce", 12)
     _bytes(plaintext, "plaintext")
     _bytes(aad, "associated data")
-    return AESGCM(key).encrypt(nonce, plaintext, aad)
+    if aead not in AEADS:
+        raise CryptoError("unsupported AEAD")
+    return AEADS[aead](key).encrypt(nonce, plaintext, aad)
 
 
-def decrypt(key: bytes, nonce: bytes, ciphertext: bytes, aad: bytes) -> bytes:
-    _bytes(key, "AES-256 key", 32)
-    _bytes(nonce, "GCM nonce", 12)
+def decrypt(
+    key: bytes, nonce: bytes, ciphertext: bytes, aad: bytes, *, aead: str = DEFAULT_AEAD
+) -> bytes:
+    _bytes(key, "AEAD key", 32)
+    _bytes(nonce, "AEAD nonce", 12)
+    if aead not in AEADS:
+        raise CryptoError("unsupported AEAD")
     _bytes(ciphertext, "ciphertext")
     _bytes(aad, "associated data")
     if len(ciphertext) < 16:
         raise CryptoError("invalid AEAD ciphertext length")
     try:
-        return AESGCM(key).decrypt(nonce, ciphertext, aad)
+        return AEADS[aead](key).decrypt(nonce, ciphertext, aad)
     except InvalidTag as exc:
         raise CryptoError("ciphertext integrity verification failed") from exc
 

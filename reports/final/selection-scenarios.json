@@ -10,102 +10,142 @@
     "liboqs_commit": "5a1a854b0dc9f2141bdc771c555ee60c37950183",
     "liboqs_python_commit": "64c76ad0a80d6c69f2003219eb27b253782a3d68"
   },
-  "generated_at": "2026-11-10T20:51:25.840364+00:00",
+  "generated_at": "2026-11-10T20:58:16.227945+00:00",
   "measurement_method": "Median of five direct authenticated handshakes per KEM. No network simulation.",
   "trials": {
     "ML-KEM-768": [
       {
-        "handshake_ms": 1.419542,
-        "handshake_bytes": 19097,
-        "message_roundtrip_ms": 0.107584,
-        "encrypt_ms": 0.039834,
-        "decrypt_ms": 0.018709,
-        "rekey_ms": 1.286833
+        "handshake_ms": 9.048875,
+        "handshake_bytes": 19346,
+        "message_roundtrip_ms": 0.0725,
+        "encrypt_ms": 0.014792,
+        "aes_256_gcm_encrypt_ms": 0.014792,
+        "decrypt_ms": 0.015083000000000001,
+        "aes_256_gcm_decrypt_ms": 0.015083000000000001,
+        "rekey_ms": 0.91325,
+        "chacha20_poly1305_encrypt_ms": 0.306834,
+        "chacha20_poly1305_decrypt_ms": 0.012291
       },
       {
-        "handshake_ms": 0.826083,
-        "handshake_bytes": 19097,
-        "message_roundtrip_ms": 0.054292,
-        "encrypt_ms": 0.013459,
-        "decrypt_ms": 0.011583999999999999,
-        "rekey_ms": 0.740375
+        "handshake_ms": 1.022917,
+        "handshake_bytes": 19346,
+        "message_roundtrip_ms": 0.053959,
+        "encrypt_ms": 0.0105,
+        "aes_256_gcm_encrypt_ms": 0.0105,
+        "decrypt_ms": 0.011417,
+        "aes_256_gcm_decrypt_ms": 0.011417,
+        "rekey_ms": 0.880958,
+        "chacha20_poly1305_encrypt_ms": 0.01075,
+        "chacha20_poly1305_decrypt_ms": 0.01175
       },
       {
-        "handshake_ms": 1.0585,
-        "handshake_bytes": 19097,
-        "message_roundtrip_ms": 0.07125,
-        "encrypt_ms": 0.017041,
-        "decrypt_ms": 0.014541,
-        "rekey_ms": 1.113167
+        "handshake_ms": 0.885167,
+        "handshake_bytes": 19346,
+        "message_roundtrip_ms": 0.051292,
+        "encrypt_ms": 0.009917,
+        "aes_256_gcm_encrypt_ms": 0.009917,
+        "decrypt_ms": 0.010958,
+        "aes_256_gcm_decrypt_ms": 0.010958,
+        "rekey_ms": 0.850125,
+        "chacha20_poly1305_encrypt_ms": 0.010416,
+        "chacha20_poly1305_decrypt_ms": 0.011167
       },
       {
-        "handshake_ms": 0.948708,
-        "handshake_bytes": 19097,
-        "message_roundtrip_ms": 0.060125,
-        "encrypt_ms": 0.01525,
-        "decrypt_ms": 0.012834,
-        "rekey_ms": 0.7475
+        "handshake_ms": 0.840875,
+        "handshake_bytes": 19346,
+        "message_roundtrip_ms": 0.056292,
+        "encrypt_ms": 0.009875,
+        "aes_256_gcm_encrypt_ms": 0.009875,
+        "decrypt_ms": 0.010667,
+        "aes_256_gcm_decrypt_ms": 0.010667,
+        "rekey_ms": 0.88325,
+        "chacha20_poly1305_encrypt_ms": 0.010667,
+        "chacha20_poly1305_decrypt_ms": 0.011083
       },
       {
-        "handshake_ms": 0.814709,
-        "handshake_bytes": 19097,
-        "message_roundtrip_ms": 0.0545,
-        "encrypt_ms": 0.010959,
-        "decrypt_ms": 0.011833,
-        "rekey_ms": 0.933958
+        "handshake_ms": 0.853208,
+        "handshake_bytes": 19346,
+        "message_roundtrip_ms": 0.050292,
+        "encrypt_ms": 0.009667,
+        "aes_256_gcm_encrypt_ms": 0.009667,
+        "decrypt_ms": 0.010708,
+        "aes_256_gcm_decrypt_ms": 0.010708,
+        "rekey_ms": 0.916125,
+        "chacha20_poly1305_encrypt_ms": 0.010084,
+        "chacha20_poly1305_decrypt_ms": 0.011125
       }
     ],
     "ML-KEM-1024": [
       {
-        "handshake_ms": 0.985708,
-        "handshake_bytes": 20253,
-        "message_roundtrip_ms": 0.049125,
-        "encrypt_ms": 0.010375,
-        "decrypt_ms": 0.010417,
-        "rekey_ms": 0.762042
+        "handshake_ms": 1.004,
+        "handshake_bytes": 20502,
+        "message_roundtrip_ms": 0.0505,
+        "encrypt_ms": 0.009833999999999999,
+        "aes_256_gcm_encrypt_ms": 0.009833999999999999,
+        "decrypt_ms": 0.01075,
+        "aes_256_gcm_decrypt_ms": 0.01075,
+        "rekey_ms": 0.901916,
+        "chacha20_poly1305_encrypt_ms": 0.010125,
+        "chacha20_poly1305_decrypt_ms": 0.011209
       },
       {
-        "handshake_ms": 0.842625,
-        "handshake_bytes": 20253,
-        "message_roundtrip_ms": 0.047625,
-        "encrypt_ms": 0.009042,
-        "decrypt_ms": 0.009916000000000001,
-        "rekey_ms": 0.863875
+        "handshake_ms": 0.900709,
+        "handshake_bytes": 20502,
+        "message_roundtrip_ms": 0.060042,
+        "encrypt_ms": 0.01175,
+        "aes_256_gcm_encrypt_ms": 0.01175,
+        "decrypt_ms": 0.01275,
+        "aes_256_gcm_decrypt_ms": 0.01275,
+        "rekey_ms": 0.9255,
+        "chacha20_poly1305_encrypt_ms": 0.010041,
+        "chacha20_poly1305_decrypt_ms": 0.010916
       },
       {
-        "handshake_ms": 0.924375,
-        "handshake_bytes": 20253,
-        "message_roundtrip_ms": 0.062959,
-        "encrypt_ms": 0.013583,
-        "decrypt_ms": 0.012792,
-        "rekey_ms": 0.878167
+        "handshake_ms": 0.937,
+        "handshake_bytes": 20502,
+        "message_roundtrip_ms": 0.049958,
+        "encrypt_ms": 0.009917,
+        "aes_256_gcm_encrypt_ms": 0.009917,
+        "decrypt_ms": 0.0105,
+        "aes_256_gcm_decrypt_ms": 0.0105,
+        "rekey_ms": 0.90625,
+        "chacha20_poly1305_encrypt_ms": 0.010041,
+        "chacha20_poly1305_decrypt_ms": 0.010958
       },
       {
-        "handshake_ms": 1.022583,
-        "handshake_bytes": 20253,
-        "message_roundtrip_ms": 0.053417,
-        "encrypt_ms": 0.012083,
-        "decrypt_ms": 0.011417,
-        "rekey_ms": 0.834333
+        "handshake_ms": 0.888833,
+        "handshake_bytes": 20502,
+        "message_roundtrip_ms": 0.049958,
+        "encrypt_ms": 0.009875,
+        "aes_256_gcm_encrypt_ms": 0.009875,
+        "decrypt_ms": 0.010542,
+        "aes_256_gcm_decrypt_ms": 0.010542,
+        "rekey_ms": 0.91425,
+        "chacha20_poly1305_encrypt_ms": 0.010083,
+        "chacha20_poly1305_decrypt_ms": 0.010959
       },
       {
-        "handshake_ms": 0.831167,
-        "handshake_bytes": 20253,
-        "message_roundtrip_ms": 0.051916,
-        "encrypt_ms": 0.010625,
-        "decrypt_ms": 0.011125,
-        "rekey_ms": 0.833542
+        "handshake_ms": 0.89,
+        "handshake_bytes": 20502,
+        "message_roundtrip_ms": 0.049875,
+        "encrypt_ms": 0.009625,
+        "aes_256_gcm_encrypt_ms": 0.009625,
+        "decrypt_ms": 0.01075,
+        "aes_256_gcm_decrypt_ms": 0.01075,
+        "rekey_ms": 0.870375,
+        "chacha20_poly1305_encrypt_ms": 0.00975,
+        "chacha20_poly1305_decrypt_ms": 0.010833
       }
     ]
   },
   "measurements": {
     "ML-KEM-768": {
-      "handshake_ms": 0.948708,
-      "handshake_bytes": 19097
+      "handshake_ms": 0.885167,
+      "handshake_bytes": 19346
     },
     "ML-KEM-1024": {
-      "handshake_ms": 0.924375,
-      "handshake_bytes": 20253
+      "handshake_ms": 0.900709,
+      "handshake_bytes": 20502
     }
   },
   "scenarios": [
@@ -118,7 +158,7 @@
         "ML-KEM-768"
       ],
       "chosen": "ML-KEM-768",
-      "reason": "ML-KEM-768: both clients permit security level 3 (minimum 3); recommended; combined policy priority 2; performance: static size from library, not a measurement (missing handshake_ms) used among equal policy ranks.",
+      "reason": "ML-KEM-768 + X25519 with AES-256-GCM: both clients permit security level 3 (minimum 3); recommended; combined policy priority 2; performance: static size from library, not a measurement (missing handshake_ms) used among equal policy ranks.",
       "performance": {
         "metrics": [],
         "values": {
@@ -144,7 +184,7 @@
         "ML-KEM-1024"
       ],
       "chosen": "ML-KEM-1024",
-      "reason": "ML-KEM-1024: both clients permit security level 5 (minimum 5); recommended; combined policy priority 2; performance: not used: only one eligible candidate.",
+      "reason": "ML-KEM-1024 + X25519 with AES-256-GCM: both clients permit security level 5 (minimum 5); recommended; combined policy priority 2; performance: not used: only one eligible candidate.",
       "performance": {
         "metrics": [],
         "values": {
@@ -169,7 +209,7 @@
         "ML-KEM-768"
       ],
       "chosen": "ML-KEM-768",
-      "reason": "ML-KEM-768: both clients permit security level 3 (minimum 3); recommended; combined policy priority 2; performance: static size from library, not a measurement (missing handshake_ms) used among equal policy ranks.",
+      "reason": "ML-KEM-768 + X25519 with AES-256-GCM: both clients permit security level 3 (minimum 3); recommended; combined policy priority 2; performance: static size from library, not a measurement (missing handshake_ms) used among equal policy ranks.",
       "performance": {
         "metrics": [],
         "values": {
@@ -196,7 +236,7 @@
         "HQC-5"
       ],
       "chosen": "HQC-3",
-      "reason": "HQC-3: both clients permit security level 3 (minimum 3); experimental, explicitly allowed by both; combined policy priority 4; performance: static size from library, not a measurement (missing handshake_ms) used among equal policy ranks.",
+      "reason": "HQC-3 + X25519 with AES-256-GCM: both clients permit security level 3 (minimum 3); experimental, explicitly allowed by both; combined policy priority 4; performance: static size from library, not a measurement (missing handshake_ms) used among equal policy ranks.",
       "performance": {
         "metrics": [],
         "values": {
@@ -223,7 +263,7 @@
         "ML-KEM-768"
       ],
       "chosen": "ML-KEM-768",
-      "reason": "ML-KEM-768: both clients permit security level 3 (minimum 3); recommended; combined policy priority 2; performance: comparable measured handshake_bytes, handshake_ms used among equal policy ranks.",
+      "reason": "ML-KEM-768 + X25519 with AES-256-GCM: both clients permit security level 3 (minimum 3); recommended; combined policy priority 2; performance: comparable measured handshake_bytes, handshake_ms used among equal policy ranks.",
       "performance": {
         "metrics": [
           "handshake_bytes",
@@ -231,18 +271,18 @@
         ],
         "values": {
           "handshake_bytes": {
-            "ML-KEM-1024": 20253,
-            "ML-KEM-768": 19097
+            "ML-KEM-1024": 20502,
+            "ML-KEM-768": 19346
           },
           "handshake_ms": {
-            "ML-KEM-1024": 0.924375,
-            "ML-KEM-768": 0.948708
+            "ML-KEM-1024": 0.900709,
+            "ML-KEM-768": 0.885167
           }
         },
         "fallback": null,
         "scores": {
-          "ML-KEM-1024": 1.974351433739359,
-          "ML-KEM-768": 1.9429220362415445
+          "ML-KEM-1024": 2.0,
+          "ML-KEM-768": 1.9263599614975877
         },
         "used_for_tiebreak": true,
         "detail": "comparable measured handshake_bytes, handshake_ms used among equal policy ranks"
@@ -257,7 +297,7 @@
         "ML-KEM-768"
       ],
       "chosen": "ML-KEM-768",
-      "reason": "ML-KEM-768: both clients permit security level 3 (minimum 3); recommended; combined policy priority 2; performance: static size from library, not a measurement (missing handshake_ms) used among equal policy ranks.",
+      "reason": "ML-KEM-768 + X25519 with AES-256-GCM: both clients permit security level 3 (minimum 3); recommended; combined policy priority 2; performance: static size from library, not a measurement (missing handshake_ms) used among equal policy ranks.",
       "performance": {
         "metrics": [],
         "values": {
@@ -292,22 +332,22 @@
         "ML-KEM-1024",
         "ML-KEM-768"
       ],
-      "chosen": "ML-KEM-1024",
-      "reason": "ML-KEM-1024: both clients permit security level 5 (minimum 3); recommended; combined policy priority 2; performance: comparable measured handshake_ms used among equal policy ranks.",
+      "chosen": "ML-KEM-768",
+      "reason": "ML-KEM-768 + X25519 with AES-256-GCM: both clients permit security level 3 (minimum 3); recommended; combined policy priority 2; performance: comparable measured handshake_ms used among equal policy ranks.",
       "performance": {
         "metrics": [
           "handshake_ms"
         ],
         "values": {
           "handshake_ms": {
-            "ML-KEM-1024": 0.924375,
-            "ML-KEM-768": 0.948708
+            "ML-KEM-1024": 0.900709,
+            "ML-KEM-768": 0.885167
           }
         },
         "fallback": null,
         "scores": {
-          "ML-KEM-1024": 0.9743514337393592,
-          "ML-KEM-768": 1.0
+          "ML-KEM-1024": 1.0,
+          "ML-KEM-768": 0.9827447044494948
         },
         "used_for_tiebreak": true,
         "detail": "comparable measured handshake_ms used among equal policy ranks"

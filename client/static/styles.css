@@ -272,3 +272,10 @@ button:active { filter: brightness(.92); }
 
 @keyframes lab-flight { to { transform: translate(var(--morph-x), var(--morph-y, 0)) scale(.64); } }
 @keyframes footer-unfold { to { transform: scaleX(1); } }
+
+#contact-card-button { align-self: flex-start; margin: 12px 8px 0; }
+#contact-card-form label { display: block; margin-top: 16px; }
+#contact-card-form textarea { display: block; width: 100%; margin-top: 8px; }
+#contact-card-file { display: block; max-width: 100%; margin-bottom: 16px; }
+
+.event-rejected, .event-rejected .event-kind { color: var(--danger); }

@@ -82,7 +82,7 @@ def stop() -> int:
 
 
 def check_ports() -> None:
-    for port in (8001, 8002, 8765):
+    for port in (8001, 8002, 8765, 8766):
         with socket.socket() as probe:
             probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
@@ -131,7 +131,7 @@ def launch_components() -> int:
             cwd=ROOT,
             check=True,
         )
-        commands = [["server.relay"]]
+        commands = [["server.relay", "--observe-port", "8766"]]
         for name, port in (("Alice", "8001"), ("Bob", "8002")):
             commands.append(
                 [
@@ -151,7 +151,7 @@ def launch_components() -> int:
                 subprocess.Popen([sys.executable, "-m", *command], cwd=ROOT)
             )
         print(
-            "Alice http://127.0.0.1:8001  Bob http://127.0.0.1:8002\nCtrl-C stops this demo.",
+            "Alice http://127.0.0.1:8001  Bob http://127.0.0.1:8002\nRelay view http://127.0.0.1:8766\nCtrl-C stops this demo.",
             flush=True,
         )
 

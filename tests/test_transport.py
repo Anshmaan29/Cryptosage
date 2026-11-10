@@ -29,10 +29,10 @@ async def stop(task):
 
 
 @asynccontextmanager
-async def clients(tmp_path, attack=None):
+async def clients(tmp_path, attack=None, *, observer=None):
     port = free_port()
     url = f"ws://127.0.0.1:{port}"
-    relay = asyncio.create_task(run(port=port, attack=attack))
+    relay = asyncio.create_task(run(port=port, attack=attack, observer=observer))
     a = Client("Alice", tmp_path / "alice", tmp_path / "contacts", url)
     b = Client("Bob", tmp_path / "bob", tmp_path / "contacts", url)
     a.identity.pin("Bob", b.identity.public, b.identity.fingerprint)
@@ -338,8 +338,10 @@ async def test_lost_receipt_retry_after_both_clients_restart(tmp_path):
                     "from",
                     "to",
                     "counter",
+                    "aead",
                     "ciphertext",
                 }
+                assert packet["aead"] == "AES-256-GCM"
                 assert result["id"] not in json.dumps(packet)
                 assert a.messages[0]["text"] not in json.dumps(packet)
             with pytest.raises(ValueError, match="Only failed or unconfirmed"):
@@ -477,3 +479,48 @@ async def test_relay_accepts_original_key_and_refuses_unverified_key_change(tmp_
         await until(
             lambda: a.connected and a.socket is not None and a.socket.close_code is None
         )
+
+
+async def test_observer_sees_real_encrypted_message_and_bounded_metadata(tmp_path):
+    from server.observer import FIELDS, Observer
+
+    observer = Observer()
+    async with clients(tmp_path, observer=observer) as (alice, bob, _, _):
+        await establish(alice, bob)
+        plaintext = "Only the endpoints see this message — नमस्ते"
+        await alice.send(plaintext)
+        await until(
+            lambda: bob.messages and alice.messages[-1]["status"] == "delivered"
+        )
+        row = next(row for row in observer.entries if row["type"] == "message")
+        assert set(row) == set(FIELDS)
+        assert row["from"] == "Alice" and row["to"] == "Bob"
+        assert row["session"] == alice.peer.session.session_id[:12]
+        assert row["counter"] == 0 and len(row["ciphertext"]) == 32
+        assert plaintext not in str(observer.entries)
+        assert bob.messages[-1]["text"] == plaintext
+        for _ in range(110):
+            observer.record({"from": "Alice", "to": "Bob", "type": "delivery"}, "{}")
+        assert len(observer.entries) == 100
+        assert row not in observer.entries
+
+
+def test_relay_lan_flag_and_read_only_view():
+    from fastapi.testclient import TestClient
+    from server.observer import Observer
+    from server.relay import parse_args
+
+    with pytest.raises(SystemExit):
+        parse_args(["--host", "0.0.0.0"])
+    assert parse_args(["--host", "0.0.0.0", "--lan"]).lan
+    assert parse_args([]).observe_port is None
+    with pytest.raises(SystemExit):
+        parse_args(["--port", "8766", "--observe-port", "8766"])
+    with TestClient(Observer().app(8766), base_url="http://127.0.0.1:8766") as http:
+        response = http.get("/")
+        assert response.status_code == 200 and "What the relay sees" in response.text
+        assert http.get("/", headers={"Host": "example.com"}).status_code == 403
+        assert (
+            http.get("/", headers={"Sec-Fetch-Site": "cross-site"}).status_code == 403
+        )
+        assert http.post("/").status_code == 405

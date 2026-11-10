@@ -3,26 +3,33 @@
 from __future__ import annotations
 import argparse
 import asyncio
+from io import BytesIO
+from ipaddress import IPv4Address, IPv4Network
+
 import os
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
+import segno
 import uvicorn
 from urllib.parse import urlsplit
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message as ASGIMessage, Receive, Scope, Send
 from pydantic import BaseModel, ConfigDict, Field
 from client.runtime import Client
 from client.storage import private_lock
-from protocol.identity import valid_name
+from protocol.identity import canonical, valid_name
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_BODY = 65_536
+LAN_RANGES = tuple(
+    IPv4Network(cidr) for cidr in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+)
 
 
 class StrictModel(BaseModel):
@@ -31,6 +38,12 @@ class StrictModel(BaseModel):
 
 class Contact(StrictModel):
     peer: str = Field(min_length=1, max_length=32)
+
+
+class ContactCard(StrictModel):
+    name: str = Field(min_length=1, max_length=32)
+    public: str = Field(max_length=3000)
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class Trust(Contact):
@@ -210,6 +223,30 @@ def create_app(
         async with local.lock:
             return {**local.state(), "csrf_token": token}
 
+    @app.get("/api/contact-card.json")
+    async def export_contact():
+        return JSONResponse(
+            local.contact_card(),
+            headers={
+                "Content-Disposition": f'attachment; filename="{local.identity.name}-contact.json"'
+            },
+        )
+
+    @app.get("/api/contact-card.svg")
+    def contact_qr():
+        card = canonical(local.contact_card())
+        output = BytesIO()
+        segno.make_qr(card, error="L", boost_error=False).save(
+            output, kind="svg", scale=4, light="white"
+        )
+        return Response(output.getvalue(), media_type="image/svg+xml")
+
+    @app.post("/api/contacts")
+    async def import_contact(body: ContactCard):
+        async with local.lock:
+            local.import_contact(body.model_dump())
+        return {"name": body.name}
+
     @app.post("/api/trust")
     async def trust(body: Trust):
         async with local.lock:
@@ -373,13 +410,18 @@ def create_app(
     return app
 
 
-def local_relay_url(value: str) -> bool:
+def local_relay_url(value: str, *, lan: bool = False) -> bool:
     try:
         url = urlsplit(value)
+        address = IPv4Address(url.hostname or "")
+        permitted = str(address) == "127.0.0.1" or (
+            lan and any(address in network for network in LAN_RANGES)
+        )
         return (
             url.scheme == "ws"
-            and url.hostname == "127.0.0.1"
+            and permitted
             and url.port is not None
+            and url.port > 0
             and url.username is None
             and url.password is None
             and url.path in ("", "/")
@@ -398,9 +440,14 @@ def main():
     p.add_argument("--contacts-dir", type=Path)
     p.add_argument("--relay", default="ws://127.0.0.1:8765")
     p.add_argument("--policy", type=Path)
+    p.add_argument(
+        "--lan", action="store_true", help="Allow a relay at a private IPv4 address"
+    )
     a = p.parse_args()
-    if not local_relay_url(a.relay):
-        p.error("The research demo relay must use a loopback ws://127.0.0.1 URL")
+    if not local_relay_url(a.relay, lan=a.lan):
+        p.error(
+            "Use a ws://127.0.0.1 relay URL, or pass --lan for a private IPv4 relay"
+        )
     try:
         data_dir = a.data_dir or ROOT / ".runtime" / valid_name(a.name)
         with private_lock(

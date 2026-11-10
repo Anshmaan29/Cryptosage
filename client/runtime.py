@@ -16,7 +16,14 @@ from websockets.exceptions import ConnectionClosed
 from client.storage import MAX_HISTORY, MAX_SEEN
 from crypto.primitives import available_algorithms, versions
 from policy.engine import load_policy
-from protocol.identity import Identity, unb64, valid_name
+from protocol.identity import (
+    Identity,
+    b64,
+    fingerprint,
+    private_write,
+    unb64,
+    valid_name,
+)
 from protocol.registration import register_client
 from protocol.session import Peer, ReceiptExpectation
 
@@ -91,8 +98,6 @@ class Client:
             data = json.loads(path.read_text())
             if data["name"] != self.identity.name:
                 key = unb64(data["public"])
-                from protocol.identity import fingerprint
-
                 fp = fingerprint(key)
                 result.append(
                     {
@@ -105,6 +110,27 @@ class Client:
                     }
                 )
         return result
+
+    def contact_card(self) -> dict[str, str]:
+        return {
+            "name": self.identity.name,
+            "public": b64(self.identity.public),
+            "fingerprint": self.identity.fingerprint,
+        }
+
+    def import_contact(self, card: dict[str, str]) -> None:
+        name = valid_name(card["name"])
+        if name == self.identity.name:
+            raise ValueError("Cannot import your own contact card")
+        public = unb64(card["public"])
+        if (
+            len(public) != len(self.identity.public)
+            or fingerprint(public) != card["fingerprint"]
+        ):
+            raise ValueError("Contact card public key or fingerprint is invalid")
+        private_write(
+            self.contacts_dir / (name + ".json"), {"name": name, "public": b64(public)}
+        )
 
     def trust(
         self,

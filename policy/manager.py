@@ -9,6 +9,7 @@ from pathlib import Path
 import tempfile
 from typing import Any
 
+from crypto.primitives import AEADS
 from policy.engine import PolicyError, validate_policy
 
 
@@ -19,6 +20,8 @@ def safe_defaults() -> dict[str, Any]:
         "allow_experimental": False,
         "performance_preference": "latency",
         "rekey_interval": 100,
+        "hybrid_x25519": "preferred",
+        "aead": list(AEADS),
         "algorithms": {
             "ML-KEM-512": {"status": "prohibited", "priority": 1},
             "ML-KEM-768": {"status": "recommended", "priority": 1},
@@ -48,8 +51,11 @@ def validate_update(
             "Research policy manager requires minimum security level 3 or higher"
         )
     rank = {"prohibited": 0, "experimental": 1, "recommended": 2}
+    hybrid_rank = {"off": 0, "preferred": 1, "required": 2}
     relaxed = (
-        policy["minimum_security_level"] < current["minimum_security_level"]
+        hybrid_rank[policy.get("hybrid_x25519", "preferred")]
+        < hybrid_rank[current.get("hybrid_x25519", "preferred")]
+        or policy["minimum_security_level"] < current["minimum_security_level"]
         or (policy["allow_experimental"] and not current["allow_experimental"])
         or policy.get("rekey_interval", 100) > current.get("rekey_interval", 100)
     )
@@ -62,6 +68,8 @@ def validate_update(
         )
     result = deepcopy(policy)
     result.setdefault("rekey_interval", 100)
+    result.setdefault("hybrid_x25519", "preferred")
+    result.setdefault("aead", list(AEADS))
     return result
 
 

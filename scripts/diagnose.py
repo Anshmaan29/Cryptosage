@@ -31,6 +31,7 @@ def main() -> int:
         "websockets",
         "cryptography",
         "psutil",
+        "segno",
         "pandas",
         "matplotlib",
         "pytest",

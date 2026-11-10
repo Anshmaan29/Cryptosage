@@ -6,6 +6,9 @@ import json
 import logging
 import secrets
 
+import uvicorn
+from server.observer import Observer
+
 from crypto.primitives import verify
 from protocol.identity import b64, fingerprint, unb64, valid_name
 from protocol.registration import registration_payload
@@ -35,7 +38,16 @@ async def verify_registration(socket) -> tuple[str, str, bool]:
     return name, fingerprint(public), hello.get("routing_status", False)
 
 
-async def run(host: str = "127.0.0.1", port: int = 8765, attack: str | None = None):
+async def run(
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    attack: str | None = None,
+    *,
+    observe_port: int | None = None,
+    observer: Observer | None = None,
+):
+    if observe_port is not None and observer is None:
+        observer = Observer()
     clients = {}
     pins: dict[str, str] = {}
     attack_used = False
@@ -88,6 +100,8 @@ async def run(host: str = "127.0.0.1", port: int = 8765, attack: str | None = No
                 ):
                     await socket.close(1008, "Invalid routing envelope")
                     return
+                if observer is not None:
+                    observer.record(packet, raw)
                 destination = clients.get(packet["to"])
                 if destination is None:
                     await status("relay_error", packet)
@@ -125,19 +139,55 @@ async def run(host: str = "127.0.0.1", port: int = 8765, attack: str | None = No
         route, host, port, max_size=262_144, max_queue=16, ping_interval=20
     ):
         log.info("Ciphertext relay listening on %s:%s", host, port)
-        await asyncio.Future()
+        if observer is None or observe_port is None:
+            await asyncio.Future()
+        else:
+            config = uvicorn.Config(
+                observer.app(observe_port),
+                host="127.0.0.1",
+                port=observe_port,
+                ws="none",
+                access_log=False,
+                proxy_headers=False,
+            )
+            await uvicorn.Server(config).serve()
 
 
-def main():
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--host", default="127.0.0.1", choices=["127.0.0.1"])
+    p.add_argument("--host", default="127.0.0.1", choices=["127.0.0.1", "0.0.0.0"])
     p.add_argument("--port", default=8765, type=int)
+    p.add_argument(
+        "--lan", action="store_true", help="Allow the relay to listen on LAN interfaces"
+    )
+    p.add_argument(
+        "--observe-port", type=int, help="Enable the read-only loopback relay view"
+    )
     p.add_argument(
         "--attack", choices=["downgrade", "identity", "replay", "tamper", "invalid"]
     )
-    args = p.parse_args()
+    args = p.parse_args(argv)
+    if args.host == "0.0.0.0" and not args.lan:
+        p.error("--host 0.0.0.0 requires --lan")
+    if args.lan and args.attack:
+        p.error("Existing relay laboratory mode is loopback-only")
+    if not 1 <= args.port <= 65535:
+        p.error("--port must be between 1 and 65535")
+    if args.observe_port is not None and (
+        not 1 <= args.observe_port <= 65535 or args.observe_port == args.port
+    ):
+        p.error("--observe-port must be a separate port between 1 and 65535")
+    return args
+
+
+def main():
+    args = parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    asyncio.run(run(args.host, args.port, args.attack))
+    if args.lan:
+        log.warning(
+            "LAN relay enabled. Treat the relay as untrusted. Routing metadata is visible on this network."
+        )
+    asyncio.run(run(args.host, args.port, args.attack, observe_port=args.observe_port))
 
 
 if __name__ == "__main__":

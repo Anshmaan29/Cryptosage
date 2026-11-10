@@ -103,7 +103,7 @@ function renderContacts() {
   setText('contact-count', contacts.length);
   const list = $('contact-list');
   list.replaceChildren();
-  if (!contacts.length) { list.append(node('p', 'loading-label', 'No contacts are available. Start the other local client.')); return; }
+  if (!contacts.length) { list.append(node('p', 'loading-label', 'No contacts yet. Import a contact card to get started.')); return; }
   for (const contact of contacts) {
     const button = node('button', 'contact-button' + (contact.name === selectedPeer ? ' selected' : ''));
     button.type = 'button';
@@ -127,10 +127,10 @@ function renderStatus() {
   setText('peer-avatar', (contact?.name || '?').slice(0, 1).toUpperCase());
   setText('peer-status', contact?.identity_changed ? 'Identity changed: connection blocked' : session ? 'Authenticated encrypted session' : trusted ? 'Identity verified, ready to connect' : 'Identity not yet verified');
   $('verify-button').disabled = !contact || pending.has('trust');
-  setText('session-banner-text', session ? `End-to-end encrypted with ${session.algorithm}. Identity verified locally.` : trusted ? 'Identity verified. Establish a session to exchange encrypted messages.' : 'Verify your contact before establishing an encrypted session.');
+  setText('session-banner-text', session ? `End-to-end encrypted with ${session.suite} using ${session.aead}. Identity verified locally.` : trusted ? 'Identity verified. Establish a session to exchange encrypted messages.' : 'Verify your contact before establishing an encrypted session.');
   setText('session-state-label', session ? 'Secure session established' : 'Not connected');
   setText('session-state-description', session ? 'Authenticated negotiation completed. Only the local clients hold the message keys.' : 'An authenticated connection starts with a verified contact.');
-  setText('detail-algorithm', session?.algorithm || 'Not established');
+  setText('detail-algorithm', session?.suite || 'Not established');
   setText('detail-trust', trusted ? 'Verified fingerprint' : 'Not verified');
   setText('detail-relay', online ? 'Connected' : 'Disconnected');
   setText('detail-handshake', session?.handshake_ms != null ? `${formatNumber(session.handshake_ms)} ms` : 'Not measured');
@@ -148,7 +148,7 @@ function renderStatus() {
   $('message-input').placeholder = session ? `Message ${contact?.name || 'your contact'}…` : 'Establish a session to write a message…';
   setText('composer-status', state.negotiating ? 'Waiting for authenticated peer confirmation' : session ? 'Encrypted locally; delivered means peer authenticated receipt' : online ? 'Reconnect securely before sending' : 'Relay offline; history remains on this client');
   setText('lab-session-status', session ? 'Authenticated session active' : 'No session established');
-  setText('lab-algorithm', session?.algorithm || 'Not established');
+  setText('lab-algorithm', session?.suite || 'Not established');
   setText('lab-security-level', session?.security_level ? `NIST level ${session.security_level}` : '—');
   setText('lab-handshake', session?.handshake_ms != null ? `${formatNumber(session.handshake_ms)} ms` : 'Not measured');
   setText('selection-reason', session?.reason || 'The policy engine will explain its decision after authenticated negotiation.');
@@ -227,8 +227,8 @@ function renderEvents() {
   list.replaceChildren();
   if (!events.length) { list.append(node('li', 'empty-table', 'No events recorded yet.')); return; }
   for (const event of events) {
-    const row = node('li', 'event-row');
-    row.append(node('time', '', formatTime(event.time || event.timestamp)), node('span', 'event-kind', humanLabel(event.kind || event.type || 'Event')), node('span', 'event-detail', typeof event.detail === 'object' ? JSON.stringify(event.detail) : event.detail || event.message || ''));
+    const row = node('li', event.kind === 'rejected' ? 'event-row event-rejected' : 'event-row');
+    row.append(node('time', '', formatTime(event.time || event.timestamp)), node('span', 'event-kind', event.kind === 'rejected' ? 'Packet rejected' : humanLabel(event.kind || event.type || 'Event')), node('span', 'event-detail', typeof event.detail === 'object' ? JSON.stringify(event.detail) : event.detail || event.message || ''));
     list.append(row);
   }
 }
@@ -396,7 +396,9 @@ function renderBenchmarks(data) {
     ['handshake_ms','Handshake computation','ms'], ['network_handshake_ms','Loopback handshake','ms'],
     ['cpu_usage_percent','Process CPU utilization','%'], ['peak_rss_bytes','Sampled process memory','bytes'],
     ['handshake_bytes','Handshake bandwidth','bytes'], ['encrypt_ms','Message encryption','ms'],
-    ['decrypt_ms','Message decryption','ms'], ['rekey_ms','Fresh session re-key','ms']
+    ['decrypt_ms','Message decryption','ms'], ['aes_256_gcm_encrypt_ms','AES-GCM encryption','ms'],
+    ['aes_256_gcm_decrypt_ms','AES-GCM decryption','ms'], ['chacha20_poly1305_encrypt_ms','ChaCha20-Poly1305 encryption','ms'],
+    ['chacha20_poly1305_decrypt_ms','ChaCha20-Poly1305 decryption','ms'], ['rekey_ms','Fresh session re-key','ms']
   ]) {
     const rows = entries.map(([name, entry]) => ({name, value:entry.statistics?.[metric]?.mean})).filter(row => typeof row.value === 'number' && Number.isFinite(row.value));
     if (!rows.length) continue;
@@ -497,6 +499,12 @@ $('benchmark-button').addEventListener('click', () => action('benchmark', $('ben
   try { renderBenchmarks(await request('/api/benchmark', {trials, profile:$('benchmark-profile').value})); setText('benchmark-progress', 'Measurements completed.'); }
   catch (error) { setText('benchmark-progress', 'Benchmark did not complete.'); throw error; }
 }));
+const aeadPreferences = {
+  'aes-first': ['AES-256-GCM', 'ChaCha20-Poly1305'],
+  'chacha-first': ['ChaCha20-Poly1305', 'AES-256-GCM'],
+  'aes-only': ['AES-256-GCM'],
+  'chacha-only': ['ChaCha20-Poly1305']
+};
 let loadedPolicy = null;
 async function loadPolicy() {
   const data = await request('/api/policy'); loadedPolicy = data.policy;
@@ -504,6 +512,9 @@ async function loadPolicy() {
   warnPolicyLevel();
   $('policy-performance').value = loadedPolicy.performance_preference;
   $('policy-rekey').value = loadedPolicy.rekey_interval || 100;
+  $('policy-hybrid').value = loadedPolicy.hybrid_x25519 || 'preferred';
+  const ciphers = loadedPolicy.aead || aeadPreferences['aes-first'];
+  $('policy-aead').value = Object.keys(aeadPreferences).find(key => aeadPreferences[key].join() === ciphers.join());
   $('policy-experimental').checked = loadedPolicy.allow_experimental;
   $('policy-json').textContent = JSON.stringify(loadedPolicy, null, 2);
   $('policy-algorithms').replaceChildren();
@@ -518,12 +529,41 @@ $('policy-level').addEventListener('change', warnPolicyLevel);
 $('policy-form').addEventListener('submit', (event) => { event.preventDefault(); action('policy', $('policy-save'), async () => {
   const policy = structuredClone(loadedPolicy); policy.minimum_security_level = Number($('policy-level').value);
   policy.performance_preference = $('policy-performance').value; policy.rekey_interval = Number($('policy-rekey').value);
+  policy.hybrid_x25519 = $('policy-hybrid').value;
+  policy.aead = aeadPreferences[$('policy-aead').value];
   policy.allow_experimental = $('policy-experimental').checked;
   document.querySelectorAll('[data-algorithm]').forEach((select) => { policy.algorithms[select.dataset.algorithm].status = select.value; });
   await request('/api/policy', {policy, confirm_restrictions:$('policy-confirm').checked}); await loadPolicy(); notify('Policy saved for future sessions.', true);
 }); });
 $('policy-reset').addEventListener('click', () => { if (!confirm('Restore defaults for future sessions? This may relax your current policy.')) return; action('policy-reset', $('policy-reset'), async () => { await request('/api/policy/reset', {confirm_restrictions:true}); await loadPolicy(); }); });
 $('protocol-refresh').addEventListener('click', refresh);
+$('contact-card-button').addEventListener('click', () => $('contact-card-dialog').showModal());
+$('close-contact-card').addEventListener('click', () => $('contact-card-dialog').close());
+$('contact-card-form').addEventListener('submit', event => {
+  event.preventDefault();
+  action('contact-card', $('contact-card-submit'), async () => {
+    const input = $('contact-card-file');
+    const formError = $('contact-card-error');
+    const file = input.files[0];
+    formError.hidden = true;
+    try {
+      const pasted = $('contact-card-json').value.trim();
+      if (!pasted && file?.size > 8192) throw new Error('Contact card files must be 8 KB or smaller.');
+      let card;
+      try { card = JSON.parse(pasted || await file?.text()); }
+      catch { throw new Error('Paste a valid contact card or choose a JSON file.'); }
+      const result = await request('/api/contacts', card);
+      await refresh();
+      selectedPeer = result.name; messageSignature = ''; render();
+      $('contact-card-form').reset();
+      $('contact-card-dialog').close();
+      notify('Contact card imported. Compare fingerprints before verifying.', true);
+    } catch (error) {
+      formError.textContent = error.message;
+      formError.hidden = false;
+    }
+  });
+});
 function renderV2() {
   const decision = state.session?.decision || state.selection_decision;
   const decisionOutput = $('selection-output'); decisionOutput.replaceChildren();
@@ -534,7 +574,7 @@ function renderV2() {
     for (const candidate of decision.candidates || []) { const section = node('section'); section.append(node('h3', '', `${candidate.name} · ${candidate.eligible ? 'Eligible' : 'Excluded'}`)); const checks = node('ul'); for (const check of candidate.checks || []) checks.append(node('li', '', `${check.passed ? 'Pass' : 'Not met'}: ${check.detail}`)); section.append(checks); decisionOutput.append(section); }
   } else decisionOutput.append(node('p', 'empty-table', 'Run a handshake to inspect the actual policy decision.'));
   const list = $('protocol-events'); list.replaceChildren();
-  for (const event of (state.events || []).slice().reverse()) list.append(node('li', '', `${formatTime(event.time)} · ${humanLabel(event.kind)} · ${event.detail}`));
+  for (const event of (state.events || []).slice().reverse()) list.append(node('li', event.kind === 'rejected' ? 'event-rejected' : '', `${formatTime(event.time)} · ${event.kind === 'rejected' ? 'Packet rejected' : humanLabel(event.kind)} · ${event.detail}`));
   if (!list.children.length) list.append(node('li', 'empty-table', 'No events recorded yet.'));
   const details = $('encryption-overview'); details.replaceChildren();
   if (state.session) details.append(node('p', '', `Session ${state.session.session_id.slice(0,12)} · ML-DSA-65 · re-key after ${state.session.rekey_interval} messages`));
@@ -550,6 +590,7 @@ function renderDemo() {
     ['Establish an authenticated session', '#messages', hasSession() ? 'Session established' : 'No active session'],
     ['Inspect the negotiated selection', '#selection', state.session?.decision ? 'Decision recorded' : 'Establish a session'],
     ['Exchange encrypted messages', '#messages', state.messages?.length ? 'Local history is available' : 'No messages yet'],
+    ['See what the relay received', 'http://127.0.0.1:8766/', 'Send “hello”, then check the relay view for its ciphertext preview'],
     ['Inspect actual protocol events', '#protocol', state.events?.length ? 'Events recorded by this client' : 'No events recorded'],
     ['Run a downgrade experiment', '#attacks', (state.attack_results || []).some(r => r.scenario === 'downgrade') ? 'Experiment recorded in this process' : 'Not yet run'],
     ['Compare measured performance', '#benchmarks', state.benchmark_completed ? 'Measurements available' : 'Not yet run in this process'],
@@ -557,7 +598,7 @@ function renderDemo() {
     ['Export recorded reports', '#benchmarks', 'Download the available reports']
   ];
   const list = $('demo-steps'); list.replaceChildren();
-  for (const [label, href, status] of items) { const li = node('li'); const link = node('a', '', label); link.href = href; li.append(link, node('span', 'muted', ` — ${status}`)); list.append(li); }
+  for (const [label, href, status] of items) { const li = node('li'); const link = node('a', '', label); link.href = href; if (href.startsWith('http:')) { link.target = '_blank'; link.rel = 'noopener'; } li.append(link, node('span', 'muted', ` — ${status}`)); list.append(li); }
 }
 async function loadV2Route(routeName) {
   if (routeName === 'policy') { try { await loadPolicy(); } catch (error) { notify(error.message); } }
