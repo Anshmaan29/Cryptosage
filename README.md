@@ -126,3 +126,14 @@ The project supports one-to-one text conversations and fresh authenticated sessi
 ## Third-party software
 
 Cryptosage uses [liboqs](https://github.com/open-quantum-safe/liboqs), distributed under the MIT License, for post-quantum cryptographic implementations.
+
+## Windows through WSL2
+
+Documented, not tested. Install WSL2 with an Ubuntu distribution, open its Ubuntu terminal, install Python 3.12 or newer, Git, a C compiler and Python's virtual-environment support, then clone the repository inside the Linux filesystem. From the project directory run:
+
+```sh
+./scripts/setup.sh
+./scripts/run_demo.sh
+```
+
+Open the printed localhost URLs in a Windows browser. Stop the demo with Ctrl-C or `./scripts/stop_demo.sh`.
