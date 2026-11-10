@@ -1,5 +1,7 @@
 # Cryptosage
 
+[Source repository](https://github.com/Anshmaan29/Cryptosage)
+
 Cryptosage is a B.Tech research prototype for policy-driven post-quantum messaging. Local clients authenticate pinned ML-DSA identities, negotiate a permitted KEM and optional X25519 contribution, and exchange authenticated encrypted messages through a relay. A security lab and benchmark reports expose the protocol's behavior for examination.
 
 ## Problem statement
@@ -105,4 +107,4 @@ The custom protocol has not received independent review or a formal proof. Endpo
 
 ## Team, license and references
 
-Team names, roll numbers and ownership are placeholders in [CONTRIBUTORS.md](CONTRIBUTORS.md). The project uses the [MIT License](LICENSE). liboqs is third-party MIT-licensed software. References and the full research discussion appear in [the report](docs/REPORT.md).
+The project uses the [MIT License](LICENSE). liboqs is third-party MIT-licensed software. References and the full research discussion appear in [the report](docs/REPORT.md).
