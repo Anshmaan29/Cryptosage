@@ -10,141 +10,141 @@
     "liboqs_commit": "5a1a854b0dc9f2141bdc771c555ee60c37950183",
     "liboqs_python_commit": "64c76ad0a80d6c69f2003219eb27b253782a3d68"
   },
-  "generated_at": "2026-11-10T20:58:16.227945+00:00",
+  "generated_at": "2026-11-10T21:23:09.684831+00:00",
   "measurement_method": "Median of five direct authenticated handshakes per KEM. No network simulation.",
   "trials": {
     "ML-KEM-768": [
       {
-        "handshake_ms": 9.048875,
+        "handshake_ms": 2.966917,
         "handshake_bytes": 19346,
-        "message_roundtrip_ms": 0.0725,
-        "encrypt_ms": 0.014792,
-        "aes_256_gcm_encrypt_ms": 0.014792,
-        "decrypt_ms": 0.015083000000000001,
-        "aes_256_gcm_decrypt_ms": 0.015083000000000001,
-        "rekey_ms": 0.91325,
-        "chacha20_poly1305_encrypt_ms": 0.306834,
-        "chacha20_poly1305_decrypt_ms": 0.012291
+        "message_roundtrip_ms": 0.065583,
+        "encrypt_ms": 0.013167,
+        "aes_256_gcm_encrypt_ms": 0.013167,
+        "decrypt_ms": 0.013833,
+        "aes_256_gcm_decrypt_ms": 0.013833,
+        "rekey_ms": 0.915875,
+        "chacha20_poly1305_encrypt_ms": 0.019583,
+        "chacha20_poly1305_decrypt_ms": 0.013708
       },
       {
-        "handshake_ms": 1.022917,
+        "handshake_ms": 0.913291,
         "handshake_bytes": 19346,
-        "message_roundtrip_ms": 0.053959,
-        "encrypt_ms": 0.0105,
-        "aes_256_gcm_encrypt_ms": 0.0105,
-        "decrypt_ms": 0.011417,
-        "aes_256_gcm_decrypt_ms": 0.011417,
-        "rekey_ms": 0.880958,
-        "chacha20_poly1305_encrypt_ms": 0.01075,
-        "chacha20_poly1305_decrypt_ms": 0.01175
+        "message_roundtrip_ms": 0.056,
+        "encrypt_ms": 0.011667,
+        "aes_256_gcm_encrypt_ms": 0.011667,
+        "decrypt_ms": 0.011708,
+        "aes_256_gcm_decrypt_ms": 0.011708,
+        "rekey_ms": 0.87125,
+        "chacha20_poly1305_encrypt_ms": 0.013125,
+        "chacha20_poly1305_decrypt_ms": 0.011917
       },
       {
-        "handshake_ms": 0.885167,
+        "handshake_ms": 0.859208,
         "handshake_bytes": 19346,
-        "message_roundtrip_ms": 0.051292,
-        "encrypt_ms": 0.009917,
-        "aes_256_gcm_encrypt_ms": 0.009917,
-        "decrypt_ms": 0.010958,
-        "aes_256_gcm_decrypt_ms": 0.010958,
-        "rekey_ms": 0.850125,
-        "chacha20_poly1305_encrypt_ms": 0.010416,
-        "chacha20_poly1305_decrypt_ms": 0.011167
+        "message_roundtrip_ms": 0.054833,
+        "encrypt_ms": 0.010291999999999999,
+        "aes_256_gcm_encrypt_ms": 0.010291999999999999,
+        "decrypt_ms": 0.011208000000000001,
+        "aes_256_gcm_decrypt_ms": 0.011208000000000001,
+        "rekey_ms": 1.181292,
+        "chacha20_poly1305_encrypt_ms": 0.009917,
+        "chacha20_poly1305_decrypt_ms": 0.01025
       },
       {
-        "handshake_ms": 0.840875,
+        "handshake_ms": 0.904542,
         "handshake_bytes": 19346,
-        "message_roundtrip_ms": 0.056292,
-        "encrypt_ms": 0.009875,
-        "aes_256_gcm_encrypt_ms": 0.009875,
-        "decrypt_ms": 0.010667,
-        "aes_256_gcm_decrypt_ms": 0.010667,
-        "rekey_ms": 0.88325,
-        "chacha20_poly1305_encrypt_ms": 0.010667,
-        "chacha20_poly1305_decrypt_ms": 0.011083
-      },
-      {
-        "handshake_ms": 0.853208,
-        "handshake_bytes": 19346,
-        "message_roundtrip_ms": 0.050292,
-        "encrypt_ms": 0.009667,
-        "aes_256_gcm_encrypt_ms": 0.009667,
+        "message_roundtrip_ms": 0.048042,
+        "encrypt_ms": 0.00975,
+        "aes_256_gcm_encrypt_ms": 0.00975,
         "decrypt_ms": 0.010708,
         "aes_256_gcm_decrypt_ms": 0.010708,
-        "rekey_ms": 0.916125,
-        "chacha20_poly1305_encrypt_ms": 0.010084,
+        "rekey_ms": 0.843833,
+        "chacha20_poly1305_encrypt_ms": 0.010291999999999999,
         "chacha20_poly1305_decrypt_ms": 0.011125
+      },
+      {
+        "handshake_ms": 0.854417,
+        "handshake_bytes": 19346,
+        "message_roundtrip_ms": 0.050125,
+        "encrypt_ms": 0.00975,
+        "aes_256_gcm_encrypt_ms": 0.00975,
+        "decrypt_ms": 0.010708,
+        "aes_256_gcm_decrypt_ms": 0.010708,
+        "rekey_ms": 1.00875,
+        "chacha20_poly1305_encrypt_ms": 0.010041,
+        "chacha20_poly1305_decrypt_ms": 0.011
       }
     ],
     "ML-KEM-1024": [
       {
-        "handshake_ms": 1.004,
+        "handshake_ms": 0.930125,
         "handshake_bytes": 20502,
-        "message_roundtrip_ms": 0.0505,
-        "encrypt_ms": 0.009833999999999999,
-        "aes_256_gcm_encrypt_ms": 0.009833999999999999,
-        "decrypt_ms": 0.01075,
-        "aes_256_gcm_decrypt_ms": 0.01075,
-        "rekey_ms": 0.901916,
-        "chacha20_poly1305_encrypt_ms": 0.010125,
-        "chacha20_poly1305_decrypt_ms": 0.011209
-      },
-      {
-        "handshake_ms": 0.900709,
-        "handshake_bytes": 20502,
-        "message_roundtrip_ms": 0.060042,
-        "encrypt_ms": 0.01175,
-        "aes_256_gcm_encrypt_ms": 0.01175,
-        "decrypt_ms": 0.01275,
-        "aes_256_gcm_decrypt_ms": 0.01275,
-        "rekey_ms": 0.9255,
-        "chacha20_poly1305_encrypt_ms": 0.010041,
-        "chacha20_poly1305_decrypt_ms": 0.010916
-      },
-      {
-        "handshake_ms": 0.937,
-        "handshake_bytes": 20502,
-        "message_roundtrip_ms": 0.049958,
-        "encrypt_ms": 0.009917,
-        "aes_256_gcm_encrypt_ms": 0.009917,
-        "decrypt_ms": 0.0105,
-        "aes_256_gcm_decrypt_ms": 0.0105,
-        "rekey_ms": 0.90625,
-        "chacha20_poly1305_encrypt_ms": 0.010041,
-        "chacha20_poly1305_decrypt_ms": 0.010958
-      },
-      {
-        "handshake_ms": 0.888833,
-        "handshake_bytes": 20502,
-        "message_roundtrip_ms": 0.049958,
-        "encrypt_ms": 0.009875,
-        "aes_256_gcm_encrypt_ms": 0.009875,
-        "decrypt_ms": 0.010542,
-        "aes_256_gcm_decrypt_ms": 0.010542,
-        "rekey_ms": 0.91425,
-        "chacha20_poly1305_encrypt_ms": 0.010083,
+        "message_roundtrip_ms": 0.046209,
+        "encrypt_ms": 0.009084,
+        "aes_256_gcm_encrypt_ms": 0.009084,
+        "decrypt_ms": 0.009708999999999999,
+        "aes_256_gcm_decrypt_ms": 0.009708999999999999,
+        "rekey_ms": 0.876916,
+        "chacha20_poly1305_encrypt_ms": 0.01,
         "chacha20_poly1305_decrypt_ms": 0.010959
       },
       {
-        "handshake_ms": 0.89,
+        "handshake_ms": 1.023167,
         "handshake_bytes": 20502,
-        "message_roundtrip_ms": 0.049875,
-        "encrypt_ms": 0.009625,
-        "aes_256_gcm_encrypt_ms": 0.009625,
-        "decrypt_ms": 0.01075,
-        "aes_256_gcm_decrypt_ms": 0.01075,
-        "rekey_ms": 0.870375,
-        "chacha20_poly1305_encrypt_ms": 0.00975,
-        "chacha20_poly1305_decrypt_ms": 0.010833
+        "message_roundtrip_ms": 0.05025,
+        "encrypt_ms": 0.009875,
+        "aes_256_gcm_encrypt_ms": 0.009875,
+        "decrypt_ms": 0.010583,
+        "aes_256_gcm_decrypt_ms": 0.010583,
+        "rekey_ms": 0.860333,
+        "chacha20_poly1305_encrypt_ms": 0.009833,
+        "chacha20_poly1305_decrypt_ms": 0.010875
+      },
+      {
+        "handshake_ms": 0.894458,
+        "handshake_bytes": 20502,
+        "message_roundtrip_ms": 0.049584,
+        "encrypt_ms": 0.009583,
+        "aes_256_gcm_encrypt_ms": 0.009583,
+        "decrypt_ms": 0.010584,
+        "aes_256_gcm_decrypt_ms": 0.010584,
+        "rekey_ms": 0.848708,
+        "chacha20_poly1305_encrypt_ms": 0.009083,
+        "chacha20_poly1305_decrypt_ms": 0.009917
+      },
+      {
+        "handshake_ms": 0.834375,
+        "handshake_bytes": 20502,
+        "message_roundtrip_ms": 0.044834,
+        "encrypt_ms": 0.008625,
+        "aes_256_gcm_encrypt_ms": 0.008625,
+        "decrypt_ms": 0.009542,
+        "aes_256_gcm_decrypt_ms": 0.009542,
+        "rekey_ms": 0.874,
+        "chacha20_poly1305_encrypt_ms": 0.00925,
+        "chacha20_poly1305_decrypt_ms": 0.009875
+      },
+      {
+        "handshake_ms": 0.948,
+        "handshake_bytes": 20502,
+        "message_roundtrip_ms": 0.050375,
+        "encrypt_ms": 0.009833,
+        "aes_256_gcm_encrypt_ms": 0.009833,
+        "decrypt_ms": 0.010834,
+        "aes_256_gcm_decrypt_ms": 0.010834,
+        "rekey_ms": 0.907791,
+        "chacha20_poly1305_encrypt_ms": 0.010042,
+        "chacha20_poly1305_decrypt_ms": 0.011
       }
     ]
   },
   "measurements": {
     "ML-KEM-768": {
-      "handshake_ms": 0.885167,
+      "handshake_ms": 0.904542,
       "handshake_bytes": 19346
     },
     "ML-KEM-1024": {
-      "handshake_ms": 0.900709,
+      "handshake_ms": 0.930125,
       "handshake_bytes": 20502
     }
   },
@@ -275,14 +275,14 @@
             "ML-KEM-768": 19346
           },
           "handshake_ms": {
-            "ML-KEM-1024": 0.900709,
-            "ML-KEM-768": 0.885167
+            "ML-KEM-1024": 0.930125,
+            "ML-KEM-768": 0.904542
           }
         },
         "fallback": null,
         "scores": {
           "ML-KEM-1024": 2.0,
-          "ML-KEM-768": 1.9263599614975877
+          "ML-KEM-768": 1.9161103517934228
         },
         "used_for_tiebreak": true,
         "detail": "comparable measured handshake_bytes, handshake_ms used among equal policy ranks"
@@ -340,14 +340,14 @@
         ],
         "values": {
           "handshake_ms": {
-            "ML-KEM-1024": 0.900709,
-            "ML-KEM-768": 0.885167
+            "ML-KEM-1024": 0.930125,
+            "ML-KEM-768": 0.904542
           }
         },
         "fallback": null,
         "scores": {
           "ML-KEM-1024": 1.0,
-          "ML-KEM-768": 0.9827447044494948
+          "ML-KEM-768": 0.9724950947453299
         },
         "used_for_tiebreak": true,
         "detail": "comparable measured handshake_ms used among equal policy ranks"
