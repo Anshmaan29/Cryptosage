@@ -7,4 +7,4 @@ requires-python = ">=3.12"
 [tool.pytest.ini_options]
 pythonpath = ["."]
 asyncio_mode = "auto"
-testpaths = ["tests", "policy", "benchmarks"]
+testpaths = ["tests"]

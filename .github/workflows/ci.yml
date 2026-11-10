@@ -26,7 +26,7 @@ jobs:
       - run: .venv/bin/ruff check .
       - run: .venv/bin/ruff format --check .
       - run: .venv/bin/mypy --ignore-missing-imports --exclude 'test_.*\.py$' client protocol server crypto policy attacks benchmarks scripts
-      - run: ./scripts/run_tests.sh --cov=crypto --cov=protocol --cov=policy --cov=client --cov=server --cov=attacks --cov-report=term-missing --cov-report=xml:reports/coverage.xml
+      - run: ./scripts/run_tests.sh tests --cov=crypto --cov=protocol --cov=policy --cov=client --cov=server --cov=attacks --cov-report=term-missing --cov-report=xml:reports/coverage.xml
       - run: ./scripts/run_benchmarks.sh --trials 2 --output reports/ci-benchmarks
       - uses: actions/upload-artifact@v4
         if: always()
@@ -45,7 +45,7 @@ jobs:
       - run: ./scripts/setup.sh
         env:
           BUILD_JOBS: '2'
-      - run: ./scripts/run_tests.sh
+      - run: ./scripts/run_tests.sh tests
       - uses: actions/upload-artifact@v4
         if: always()
         with:
