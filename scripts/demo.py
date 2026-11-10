@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -34,7 +35,10 @@ def process_fingerprint(pid: int) -> str | None:
     if (
         result.returncode != 0
         or not fingerprint.startswith(f"{os.getuid()} ")
-        or not fingerprint.endswith(" -m scripts.demo launch")
+        or not re.search(
+            r" -m scripts\.demo launch(?: --attack (?:downgrade|identity|replay|tamper|invalid))?$",
+            fingerprint,
+        )
     ):
         return None
     return fingerprint
@@ -93,12 +97,12 @@ def check_ports() -> None:
                 ) from exc
 
 
-def launch() -> int:
+def launch(attack: str | None = None) -> int:
     with private_lock(LOCK, "A demo launcher is already running"):
-        return launch_components()
+        return launch_components(attack)
 
 
-def launch_components() -> int:
+def launch_components(attack: str | None = None) -> int:
     record = read_record()
     if record and recorded_launcher_alive(record):
         raise ValueError(
@@ -132,6 +136,8 @@ def launch_components() -> int:
             check=True,
         )
         commands = [["server.relay", "--observe-port", "8766"]]
+        if attack:
+            commands[0].extend(["--attack", attack])
         for name, port in (("Alice", "8001"), ("Bob", "8002")):
             commands.append(
                 [
@@ -180,9 +186,14 @@ def launch_components() -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["launch", "stop"])
+    parser.add_argument(
+        "--attack", choices=["downgrade", "identity", "replay", "tamper", "invalid"]
+    )
     args = parser.parse_args()
+    if args.attack and args.action != "launch":
+        parser.error("--attack requires launch")
     try:
-        return launch() if args.action == "launch" else stop()
+        return launch(args.attack) if args.action == "launch" else stop()
     except (ValueError, OSError, subprocess.CalledProcessError) as exc:
         print(f"Demo diagnostic: {exc}", file=sys.stderr)
         return 1

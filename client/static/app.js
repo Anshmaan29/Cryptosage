@@ -591,6 +591,7 @@ function renderDemo() {
     ['Inspect the negotiated selection', '#selection', state.session?.decision ? 'Decision recorded' : 'Establish a session'],
     ['Exchange encrypted messages', '#messages', state.messages?.length ? 'Local history is available' : 'No messages yet'],
     ['See what the relay received', 'http://127.0.0.1:8766/', 'Send “hello”, then check the relay view for its ciphertext preview'],
+    ['Live malicious relay', '#protocol', 'Start the local demo with --attack, then inspect rejected packets in this event history'],
     ['Inspect actual protocol events', '#protocol', state.events?.length ? 'Events recorded by this client' : 'No events recorded'],
     ['Run a downgrade experiment', '#attacks', (state.attack_results || []).some(r => r.scenario === 'downgrade') ? 'Experiment recorded in this process' : 'Not yet run'],
     ['Compare measured performance', '#benchmarks', state.benchmark_completed ? 'Measurements available' : 'Not yet run in this process'],
