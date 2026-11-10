@@ -2,7 +2,7 @@
 
 ## Intended demonstration
 
-Crytosage demonstrates policy-based KEM selection, contact authentication, transcript integrity, authenticated key establishment, directional message-key evolution, attack rejection, and reproducible evaluation. The prototype assumes that the two endpoint machines, their Python clients, and their local browsers are trusted. Users compare identity fingerprints through a trusted channel before pinning them.
+Cryptosage demonstrates policy-based KEM selection, contact authentication, transcript integrity, authenticated key establishment, directional message-key evolution, attack rejection, and reproducible evaluation. The prototype assumes that the two endpoint machines, their Python clients, and their local browsers are trusted. Users compare identity fingerprints through a trusted channel before pinning them.
 
 An attacker may control the relay and network traffic, introduce its own identities, supply malformed packets, and replay recorded packets. The protocol treats capability lists, selected identifiers, identity keys, and ciphertexts as untrusted until validation succeeds.
 

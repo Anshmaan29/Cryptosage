@@ -1,14 +1,14 @@
-# Crytosage
+# Cryptosage
 
 **Policy-Driven Post-Quantum Secure Messaging System with Automated Security Evaluation**
 
-Crytosage is a B.Tech research prototype for one-to-one messaging. Two local Python clients authenticate each other, negotiate a permitted post-quantum KEM and optional X25519, and exchange authenticated ciphertext through a separate WebSocket relay. A browser interface presents conversations, contact verification, protocol events, controlled attack experiments, and real benchmarks.
+Cryptosage is a B.Tech research prototype for one-to-one messaging. Two local Python clients authenticate each other, negotiate a permitted post-quantum KEM and optional X25519, and exchange authenticated ciphertext through a separate WebSocket relay. A browser interface presents conversations, contact verification, protocol events, controlled attack experiments, and real benchmarks.
 
 The custom protocol is for study and testing. It has not received a formal security proof or independent cryptographic review and must not be used for sensitive communications.
 
 ## Try the browser prototype
 
-Open [Crytosage](https://crytosage.anshmaansingh.workers.dev/) in a modern browser, create a private chat, and share its invite with one person. Each browser runs the cryptography locally. Cloudflare routes encrypted packets between the two browsers. The hosted demo has temporary room history. See [browser build and trust model](docs/BROWSER-DEMO.md).
+Open [Cryptosage](https://crytosage.anshmaansingh.workers.dev/) in a modern browser, create a private chat, and share its invite with one person. Each browser runs the cryptography locally. Cloudflare routes encrypted packets between the two browsers. The hosted demo has temporary room history. See [browser build and trust model](docs/BROWSER-DEMO.md).
 
 ## What runs
 

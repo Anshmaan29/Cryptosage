@@ -1,7 +1,7 @@
 [project]
 name = "crytosage"
-version = "0.1.0"
-description = "Policy-driven post-quantum messaging research prototype"
+version = "1.0.0"
+description = "Cryptosage policy-driven post-quantum messaging research prototype"
 requires-python = ">=3.12"
 
 [tool.pytest.ini_options]

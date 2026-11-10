@@ -1,4 +1,4 @@
-# Crytosage V3 macOS verification
+# Cryptosage V3 macOS verification
 
 The work began from `805c774` on the local `codex/macos-v3` branch. The checkout was empty before cloning. The host was an Apple M4 (`Mac16,12`, arm64), with 10 CPU cores and 16 GiB of RAM. macOS reported 27.2 (26B123). The project used Python 3.14.3, Apple clang 21.0.0, CMake 4.4.4 and Ninja 1.13.2. Homebrew was already available. The project built its pinned arm64 liboqs 0.16.0 and liboqs-python 0.16.0.2 locally. The setup script passed real ML-KEM-768 and HQC-3 encapsulation/decapsulation and ML-DSA-65 sign/verify checks.
 
