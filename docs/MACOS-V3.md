@@ -29,7 +29,7 @@ Both algorithms were measured in each profile. The cells below show median and n
 | Moderate, 25 ms added per send | 30 | 117.13 / 120.37 | 124.49 / 126.19 |
 | Constrained, 100 ms per send and 256 kb/s modeled payload rate | 30 | 1194.66 / 1196.64 | 1545.54 / 1548.37 |
 
-Under localhost conditions, median direct authenticated handshake time was 2.44 ms for ML-KEM-768 and 11.31 ms for HQC-3. Public key and ciphertext sizes were 1,184 and 1,088 bytes for ML-KEM-768, and 4,514 and 8,978 bytes for HQC-3. Canonical four-flight handshakes carried 24,762 and 35,277 bytes respectively. Both handshakes include capability advertisements and both ephemeral KEM public keys.
+Under localhost conditions, median direct authenticated handshake time was 2.44 ms for ML-KEM-768 and 11.31 ms for HQC-3. Public key and ciphertext sizes were 1,184 and 1,088 bytes for ML-KEM-768, and 4,514 and 8,978 bytes for HQC-3. Canonical four-flight handshakes carried 24,762 and 35,277 bytes respectively. These historical runs included capability advertisements and both ephemeral KEM public keys.
 
 These results are from one host. Profiles ran sequentially without fixing CPU frequency or isolating background load. Profile B and C inject delay outside the cryptographic operations, and profile C models payload serialization. All sockets stayed on localhost, with no packet loss injected. RSS was sampled and includes the Python process. These figures do not measure physical WAN behavior or peak native allocation.
 

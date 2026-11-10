@@ -5,7 +5,7 @@ import socket
 from contextlib import asynccontextmanager
 import pytest
 from client.runtime import Client
-from server.relay import run
+from server.relay import run, verify_registration
 
 
 def free_port():
@@ -47,8 +47,14 @@ async def clients(tmp_path, attack=None):
 
 
 async def establish(a, b):
-    await a.establish("Bob")
-    await until(lambda: a.peer.session and b.peer.session)
+    started = await a.establish("Bob")
+    await until(
+        lambda: all(
+            client.peer.session
+            and client.peer.session.session_id == started["session_id"]
+            for client in (a, b)
+        )
+    )
     assert a.peer.session.session_id == b.peer.session.session_id
 
 
@@ -171,6 +177,7 @@ async def test_malformed_relay_registration_closes_cleanly(hello, caplog):
         else:
             pytest.fail("Relay startup failed")
         async with ws:
+            assert json.loads(await ws.recv())["type"] == "challenge"
             await ws.send(json.dumps(hello))
             with pytest.raises(ConnectionClosed) as closed:
                 await ws.recv()
@@ -252,8 +259,7 @@ async def test_lost_receipt_retry_after_both_clients_restart(tmp_path):
     routed = []
 
     async def route(ws):
-        hello = json.loads(await ws.recv())
-        name = hello["register"]
+        name, _, _ = await verify_registration(ws)
         registered[name] = ws
         await ws.send(json.dumps({"type": "registered", "name": name}))
         try:
@@ -403,3 +409,69 @@ async def test_real_clients_negotiate_hqc_only_with_both_policies_opted_in(tmp_p
         await a.send("HQC session uses real loopback transport")
         await until(lambda: a.messages[0]["status"] == "delivered")
         assert b.messages[0]["text"] == a.messages[0]["text"]
+
+
+async def test_previous_session_receives_in_flight_message_after_rekey(tmp_path):
+    import json
+    import time
+
+    async with clients(tmp_path) as (a, b, _, _):
+        await establish(a, b)
+        old = a.peer.session
+        await a.establish("Bob")
+        # Hold an envelope from the retiring epoch until both peers install the replacement.
+        packet = old.seal("In flight during re-key")
+        outgoing = {
+            "direction": "sent",
+            "peer": "Bob",
+            "text": "In flight during re-key",
+            "time": "2026-11-11",
+            "status": "sent",
+        }
+        a.messages.append(outgoing)
+        a.outbox[(packet["sid"], packet["counter"])] = {
+            "message": outgoing,
+            "expectation": old.receipt_expectation(packet),
+            "started": time.monotonic(),
+        }
+        await until(lambda: a.peer.session.session_id != old.session_id)
+        assert a.peer.session.session_id == b.peer.session.session_id
+        await a.socket.send(json.dumps(packet))
+        await until(lambda: outgoing["status"] == "delivered")
+        assert [row["text"] for row in b.messages] == ["In flight during re-key"]
+
+
+async def test_simultaneous_automatic_rekey_keeps_both_sends(tmp_path):
+    async with clients(tmp_path) as (a, b, _, _):
+        for client in (a, b):
+            client.peer.policy["rekey_interval"] = 1
+        await establish(a, b)
+        old = a.peer.session.session_id
+        await asyncio.gather(a.send("first Alice"), b.send("first Bob"))
+        await until(lambda: not a.outbox and not b.outbox)
+        await asyncio.gather(a.send("second Alice"), b.send("second Bob"))
+        await until(lambda: not a.outbox and not b.outbox)
+        assert a.peer.session.session_id == b.peer.session.session_id != old
+        assert [
+            row["text"] for row in a.messages if row["direction"] == "received"
+        ] == ["first Bob", "second Bob"]
+        assert [
+            row["text"] for row in b.messages if row["direction"] == "received"
+        ] == ["first Alice", "second Alice"]
+
+
+async def test_relay_accepts_original_key_and_refuses_unverified_key_change(tmp_path):
+    from protocol.identity import Identity
+    from protocol.registration import register_client
+    from websockets.asyncio.client import connect
+    from websockets.exceptions import ConnectionClosed
+
+    async with clients(tmp_path) as (a, _, _, _):
+        await a.socket.close()
+        impostor = Identity(tmp_path / "replacement", "Alice")
+        async with connect(a.relay_url, proxy=None) as ws:
+            with pytest.raises(ConnectionClosed, match="Routing identity key changed"):
+                await register_client(ws, impostor)
+        await until(
+            lambda: a.connected and a.socket is not None and a.socket.close_code is None
+        )

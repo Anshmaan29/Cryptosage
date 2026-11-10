@@ -287,9 +287,24 @@ def test_relay_dependency_graph_has_no_private_crypto_operations():
             elif isinstance(node, ast.ImportFrom) and node.module:
                 imports = [node.module]
             for imported in imports:
-                assert imported.split(".")[0] not in forbidden_roots, (
-                    f"{module} imports {imported}"
+                public_registration = (
+                    module == "server.relay"
+                    and isinstance(node, ast.ImportFrom)
+                    and {alias.name for alias in node.names}
+                    <= {
+                        "crypto.primitives": {"verify"},
+                        "protocol.identity": {
+                            "b64",
+                            "unb64",
+                            "fingerprint",
+                            "valid_name",
+                        },
+                        "protocol.registration": {"registration_payload"},
+                    }.get(imported, set())
                 )
+                assert (
+                    public_registration or imported.split(".")[0] not in forbidden_roots
+                ), f"{module} imports {imported}"
                 if imported.split(".")[0] in {"server", "attacks"}:
                     queue.append(imported)
             if isinstance(node, ast.Call):

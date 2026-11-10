@@ -8,6 +8,7 @@ import time
 from websockets.asyncio.client import connect
 from protocol.identity import canonical
 from protocol.session import Peer
+from protocol.registration import register_client
 from server.relay import run
 
 
@@ -83,11 +84,8 @@ async def measure(identity_a, identity_b, policy, delay_ms=0, *, bandwidth_bps=N
             raise ValueError("Benchmark relay did not start")
         async with first, connect(f"ws://127.0.0.1:{port}", proxy=None) as second:
             async with asyncio.timeout(40):
-                for ws, name in ((first, identity_a.name), (second, identity_b.name)):
-                    await ws.send(json.dumps({"register": name}))
-                    registered = json.loads(await ws.recv())
-                    if registered.get("type") != "registered":
-                        raise RuntimeError("Benchmark relay registration failed")
+                for ws, identity in ((first, identity_a), (second, identity_b)):
+                    await register_client(ws, identity)
                 a, b = Peer(identity_a, policy), Peer(identity_b, policy)
                 handshake_ms = await handshake(a, b, first, second)
                 packet = a.session.seal("Measured loopback message")

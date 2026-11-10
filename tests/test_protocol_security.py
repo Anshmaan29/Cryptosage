@@ -378,3 +378,27 @@ def test_duplicate_response_before_ack_is_replay_not_internal_error():
         ack = bob.receive(finish)
         alice.receive(ack)
         assert alice.session and bob.session
+
+
+def test_initiator_advertises_and_generates_keys_only_for_admissible_kems(peers):
+    alice, _ = peers
+    offer = alice.initiate("Bob")
+    assert "ML-KEM-768" in offer["kem_keys"]
+    assert "HQC-3" not in offer["kem_keys"]
+    assert set(offer["kem_keys"]) == set(offer["offer"]["algorithms"])
+    alice.pending = None
+    alice.policy["allow_experimental"] = True
+    opted_in = alice.initiate("Bob")
+    assert "HQC-3" in opted_in["kem_keys"]
+    assert set(opted_in["kem_keys"]) == set(opted_in["offer"]["algorithms"])
+
+
+def test_simultaneous_initiation_keeps_the_smaller_identity_offer(peers):
+    alice, bob = peers
+    first, second = alice.initiate("Bob"), bob.initiate("Alice")
+    assert alice.receive(second) is None
+    response = bob.receive(first)
+    finish = alice.receive(response)
+    ack = bob.receive(finish)
+    assert alice.receive(ack) is None
+    assert alice.session.session_id == bob.session.session_id == first["sid"]

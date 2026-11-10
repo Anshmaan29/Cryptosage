@@ -86,6 +86,21 @@ def _offer(offer: dict[str, Any]) -> tuple[set[str], dict[str, Any]]:
     return set(names), validate_policy(offer.get("policy"))
 
 
+def admissible_algorithms(policy: dict) -> list[str]:
+    rules = policy["algorithms"]
+    return [
+        row["name"]
+        for row in available_algorithms()
+        if (rule := rules.get(row["name"])) is not None
+        and rule["status"] != "prohibited"
+        and row["security_level"] >= policy["minimum_security_level"]
+        and (
+            policy["allow_experimental"]
+            or "experimental" not in (rule["status"], row["status"])
+        )
+    ]
+
+
 def select(
     local_offer: dict[str, Any],
     peer_offer: dict[str, Any],

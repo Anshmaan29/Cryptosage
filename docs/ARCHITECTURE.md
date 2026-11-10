@@ -4,6 +4,8 @@
 
 Each identity has its own Python process, local identity directory, ratchet state, and FastAPI UI endpoint. A browser on the same machine communicates with that local endpoint. The separate relay routes JSON envelopes over WebSockets and has no access to private identity keys, KEM secret keys, message keys, or plaintext through the protocol.
 
+The native relay verifies one public ML-DSA-65 possession proof at registration. It binds a name to the first verified key fingerprint until the relay restarts. The challenge is fresh per connection. This limits replacement after first registration. It cannot establish who should own a previously unseen name. Clients still authenticate their contacts independently. The relay has no private key, session key or plaintext.
+
 ```mermaid
 flowchart LR
     A["Alice browser · 8001"] --> B["Alice local Python client"]

@@ -1,17 +1,43 @@
-"""Untrusted routing only. This module deliberately has no cryptographic imports."""
+"""Route opaque envelopes. Only registration verifies a public ML-DSA signature."""
 
 import argparse
 import asyncio
 import json
 import logging
+import secrets
+
+from crypto.primitives import verify
+from protocol.identity import b64, fingerprint, unb64, valid_name
+from protocol.registration import registration_payload
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosed
 
 log = logging.getLogger("relay")
 
 
+async def verify_registration(socket) -> tuple[str, str, bool]:
+    challenge = secrets.token_bytes(32)
+    await socket.send(json.dumps({"type": "challenge", "challenge": b64(challenge)}))
+    hello = json.loads(await asyncio.wait_for(socket.recv(), 5))
+    required = {"register", "identity", "signature"}
+    if (
+        not isinstance(hello, dict)
+        or not required <= set(hello) <= required | {"routing_status"}
+        or type(hello.get("routing_status", False)) is not bool
+    ):
+        raise ValueError("Malformed registration")
+    name = valid_name(hello["register"])
+    public = unb64(hello["identity"])
+    if not verify(
+        public, registration_payload(challenge, name), unb64(hello["signature"])
+    ):
+        raise ValueError("Invalid registration signature")
+    return name, fingerprint(public), hello.get("routing_status", False)
+
+
 async def run(host: str = "127.0.0.1", port: int = 8765, attack: str | None = None):
     clients = {}
+    pins: dict[str, str] = {}
     attack_used = False
 
     async def route(socket):
@@ -22,33 +48,23 @@ async def run(host: str = "127.0.0.1", port: int = 8765, attack: str | None = No
             if socket.request.headers.get("Origin") is not None:
                 await socket.close(1008, "Local Python clients only")
                 return
-            hello = json.loads(await asyncio.wait_for(socket.recv(), timeout=5))
-            if not isinstance(hello, dict):
-                await socket.close(1008, "Malformed registration")
+            candidate, key, routing_status = await verify_registration(socket)
+            if candidate in pins and pins[candidate] != key:
+                log.warning("Registration key changed for routing name %s", candidate)
+                await socket.close(1008, "Routing identity key changed")
                 return
-            candidate = hello.get("register")
-            if (
-                (
-                    set(hello) != {"register"}
-                    and (
-                        set(hello) != {"register", "routing_status"}
-                        or hello["routing_status"] is not True
-                    )
+            if candidate in clients or (candidate not in pins and len(pins) >= 4096):
+                await socket.close(
+                    1008, "Duplicate routing name or registration capacity reached"
                 )
-                or not isinstance(candidate, str)
-                or not candidate.isascii()
-                or not candidate.replace("_", "").replace("-", "").isalnum()
-                or not 1 <= len(candidate) <= 32
-                or candidate in clients
-            ):
-                await socket.close(1008, "Invalid or duplicate routing name")
                 return
             name = candidate
+            pins.setdefault(name, key)
             clients[name] = socket
             await socket.send(json.dumps({"type": "registered", "name": name}))
 
             async def status(kind, packet):
-                if hello.get("routing_status"):
+                if routing_status:
                     await socket.send(
                         json.dumps(
                             {

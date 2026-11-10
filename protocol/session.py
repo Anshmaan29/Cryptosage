@@ -9,7 +9,6 @@ import time
 from copy import deepcopy
 from dataclasses import dataclass, field
 from crypto.primitives import (
-    available_algorithms,
     kem_keypair,
     encapsulate,
     decapsulate,
@@ -19,7 +18,7 @@ from crypto.primitives import (
     decrypt,
 )
 from protocol.identity import Identity, b64, unb64, canonical
-from policy.engine import select
+from policy.engine import admissible_algorithms, select
 
 VERSION = "crytosage/2"
 MAX_MESSAGE = 16_384
@@ -60,6 +59,7 @@ class Session:
     decryption_us: float = 0
     rekey_interval: int = REKEY_AFTER
     decision: dict = field(default_factory=dict)
+    security_level: int = 0
     _issue_receipt_key: bytes = field(default=b"", repr=False)
     _verify_receipt_key: bytes = field(default=b"", repr=False)
     expires_at: float = field(
@@ -86,6 +86,7 @@ class Session:
             elapsed,
             rekey_interval=selection.get("rekey_interval", REKEY_AFTER),
             decision=deepcopy(selection.get("decision", {})),
+            security_level=selection["security_level"],
             _issue_receipt_key=hkdf(
                 root,
                 b"crytosage/2/responder-delivery"
@@ -220,7 +221,7 @@ class Session:
             "session_id": self.session_id,
             "peer": self.peer,
             "algorithm": self.algorithm,
-            "security_level": 3,
+            "security_level": self.security_level,
             "reason": self.reason,
             "decision": self.decision,
             "rekey_interval": self.rekey_interval,
@@ -268,12 +269,13 @@ class Peer:
         self.measurements = measurements or {}
         self.pending: dict | None = None
         self.session: Session | None = None
+        self.previous: dict[str, tuple[Session, float]] = {}
         self.seen: dict[str, float] = {}
         self.last_decision: dict | None = None
 
     def _offer(self) -> dict:
         return {
-            "algorithms": [a["name"] for a in available_algorithms()],
+            "algorithms": admissible_algorithms(self.policy),
             "policy": deepcopy(self.policy),
             "measurements": deepcopy(self.measurements),
         }
@@ -345,11 +347,22 @@ class Peer:
             "start": started,
             "expires": time.monotonic() + 30,
         }
-        self.session = None
         return packet
 
+    def receive_session(self, sid: object) -> Session | None:
+        if not isinstance(sid, str):
+            return None
+        if self.session and sid == self.session.session_id:
+            return self.session
+        old = self.previous.get(sid)
+        return old[0] if old and time.monotonic() < old[1] else None
+
     def expire(self) -> bool:
-        if self.pending and time.monotonic() > self.pending["expires"]:
+        now = time.monotonic()
+        self.previous = {
+            sid: entry for sid, entry in self.previous.items() if entry[1] > now
+        }
+        if self.pending and now > self.pending["expires"]:
             self.pending = None
             return True
         return False
@@ -386,10 +399,19 @@ class Peer:
             }
             if body["sid"] in self.seen:
                 raise ValueError("Replay rejected: session identifier already seen")
-            if self.pending:
-                raise ValueError("A handshake is already in progress")
             if len(self.seen) >= 4096:
                 raise ValueError("Handshake replay cache full; retry later")
+            if self.pending:
+                outgoing = self.pending["offer"]
+                if (
+                    self.pending["role"] != "initiator"
+                    or "keys" not in self.pending
+                    or outgoing["to"] != body["from"]
+                ):
+                    raise ValueError("A handshake is already in progress")
+                if self.identity.name < body["from"]:
+                    self.seen[body["sid"]] = time.monotonic() + 120
+                    return None
             local_offer = self._offer()
             selection = self._select(body["offer"], local_offer)
             algorithm = selection["algorithm"]
@@ -428,7 +450,6 @@ class Peer:
                 "expires": time.monotonic() + 30,
             }
             self.seen[body["sid"]] = time.monotonic() + 120
-            self.session = None
             return self._signed(response)
         if kind == "response":
             body = self._verify(packet)
@@ -516,7 +537,8 @@ class Peer:
                 p["transcript"],
                 packet["confirmation"],
             )
-            self.session = Session.create(
+            old = self.session
+            new = Session.create(
                 offer["sid"],
                 self.identity.name,
                 remote,
@@ -526,6 +548,11 @@ class Peer:
                 role == "initiator",
                 (time.perf_counter_ns() - p["start"]) / 1e6,
             )
+            if old and old.peer == new.peer:
+                self.previous[old.session_id] = (old, time.monotonic() + 10)
+            elif old:
+                self.previous.clear()
+            self.session = new
             self.pending = None
             if kind == "finish":
                 return {

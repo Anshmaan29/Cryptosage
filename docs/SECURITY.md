@@ -6,6 +6,8 @@ Crytosage demonstrates policy-based KEM selection, contact authentication, trans
 
 An attacker may control the relay and network traffic, introduce its own identities, supply malformed packets, and replay recorded packets. The protocol treats capability lists, selected identifiers, identity keys, and ciphertexts as untrusted until validation succeeds.
 
+The native relay verifies one public ML-DSA-65 possession proof at registration. It binds a name to the first verified key fingerprint until the relay restarts. The challenge is fresh per connection. This limits replacement after first registration. It cannot establish who should own a previously unseen name. Clients still authenticate their contacts independently. The relay has no private key, session key or plaintext.
+
 | Attempt | Relevant check | Limit |
 | --- | --- | --- |
 | Edit capability list or selected KEM | ML-DSA signatures, offer hash, independently recomputed policy selection | A trusted malicious endpoint can refuse to connect |

@@ -9,13 +9,24 @@ let eventSignature = '';
 let pending = new Set();
 let refreshing = false;
 let requestedSession = null;
-const descriptions = {
-  downgrade: 'Modify authenticated negotiation to try to force a different algorithm.',
-  identity: 'Substitute an identity key and check whether established contact trust rejects it.',
-  replay: 'Replay a previously accepted message and check the receiving message counter.',
-  tamper: 'Change ciphertext bytes and check authenticated decryption. Corrupted plaintext must never appear.',
-  invalid: 'Submit malformed protocol or cryptographic input and observe safe rejection.'
-};
+const messageEncoder = new TextEncoder();
+const messageLimit = 16384;
+let attackCatalog = [];
+
+function messageSize() { return messageEncoder.encode($('message-input').value.trim()).length; }
+
+function describeAttack() {
+  const selected = attackCatalog.find(row => row.id === $('attack-scenario').value);
+  setText('attack-explanation', selected ? [selected.objective, selected.mutation].filter(Boolean).join(' ') : '');
+  $('attack-button').disabled = !selected;
+}
+
+function warnPolicyLevel() {
+  const algorithms = state?.algorithms;
+  $('policy-level-warning').hidden = !algorithms || algorithms.some(
+    algorithm => algorithm.security_level >= Number($('policy-level').value)
+  );
+}
 
 function node(tag, className, text) {
   const el = document.createElement(tag);
@@ -130,7 +141,10 @@ function renderStatus() {
   $('start-button').disabled = !contact || !online || !!requestedSession || !!state.negotiating || pending.has('connect');
   $('start-button').firstChild.textContent = trusted ? 'Establish secure session' : 'Verify contact to begin';
   $('message-input').disabled = !session || !online || !!state.negotiating || pending.has('message');
-  $('send-button').disabled = !session || !online || !!state.negotiating || pending.has('message') || !$('message-input').value.trim();
+  const size = messageSize();
+  setText('message-bytes', `${size.toLocaleString()} / 16,384 bytes${size > messageLimit ? ' (over limit)' : ''}`);
+  $('send-button').disabled = !session || !online || !!state.negotiating || pending.has('message') || !size || size > messageLimit;
+  warnPolicyLevel();
   $('message-input').placeholder = session ? `Message ${contact?.name || 'your contact'}…` : 'Establish a session to write a message…';
   setText('composer-status', state.negotiating ? 'Waiting for authenticated peer confirmation' : session ? 'Encrypted locally; delivered means peer authenticated receipt' : online ? 'Reconnect securely before sending' : 'Relay offline; history remains on this client');
   setText('lab-session-status', session ? 'Authenticated session active' : 'No session established');
@@ -446,7 +460,7 @@ $('copy-fingerprint').addEventListener('click', async () => {
 $('message-form').addEventListener('submit', (event) => {
   event.preventDefault();
   const text = $('message-input').value.trim();
-  if (!text || !hasSession()) return;
+  if (!text || !hasSession() || messageSize() > messageLimit) return;
   const binding = { peer: selectedPeer, session_id: state.session.session_id };
   action('message', $('send-button'), async () => { await request('/api/message', { text, ...binding }); $('message-input').value = ''; $('message-input').style.height = ''; }).then(() => { if (!$('message-input').disabled) $('message-input').focus(); });
 });
@@ -460,7 +474,7 @@ $('rekey-button').addEventListener('click', () => {
     notify('Fresh key negotiation requested. Waiting for peer confirmation.', true);
   });
 });
-$('attack-scenario').addEventListener('change', () => setText('attack-explanation', descriptions[$('attack-scenario').value]));
+$('attack-scenario').addEventListener('change', describeAttack);
 $('attack-form').addEventListener('submit', (event) => { event.preventDefault(); action('attack', $('attack-button'), async () => renderAttack(await request('/api/attack', { scenario: $('attack-scenario').value }))); });
 
 $('report-button').addEventListener('click', () => action('report', $('report-button'), async () => renderReport(await request('/api/report'))));
@@ -487,6 +501,7 @@ let loadedPolicy = null;
 async function loadPolicy() {
   const data = await request('/api/policy'); loadedPolicy = data.policy;
   $('policy-level').value = loadedPolicy.minimum_security_level;
+  warnPolicyLevel();
   $('policy-performance').value = loadedPolicy.performance_preference;
   $('policy-rekey').value = loadedPolicy.rekey_interval || 100;
   $('policy-experimental').checked = loadedPolicy.allow_experimental;
@@ -499,6 +514,7 @@ async function loadPolicy() {
   }
   setText('policy-status','Changes apply to new sessions.');
 }
+$('policy-level').addEventListener('change', warnPolicyLevel);
 $('policy-form').addEventListener('submit', (event) => { event.preventDefault(); action('policy', $('policy-save'), async () => {
   const policy = structuredClone(loadedPolicy); policy.minimum_security_level = Number($('policy-level').value);
   policy.performance_preference = $('policy-performance').value; policy.rekey_interval = Number($('policy-rekey').value);
@@ -545,7 +561,22 @@ function renderDemo() {
 }
 async function loadV2Route(routeName) {
   if (routeName === 'policy') { try { await loadPolicy(); } catch (error) { notify(error.message); } }
-  if (routeName === 'attacks') { try { const rows = await request('/api/attacks'); const select = $('attack-scenario'); const current = select.value; select.replaceChildren(); for (const row of rows) { const option = node('option', '', row.name); option.value = row.id; select.append(option); } select.value = current; } catch (error) { notify(error.message); } }
+  if (routeName === 'attacks') {
+    try {
+      attackCatalog = await request('/api/attacks');
+      const select = $('attack-scenario');
+      const previous = select.value;
+      select.replaceChildren();
+      for (const row of attackCatalog) {
+        const option = node('option', '', row.name);
+        option.value = row.id;
+        select.append(option);
+      }
+      select.disabled = !attackCatalog.length;
+      if (attackCatalog.some(row => row.id === previous)) select.value = previous;
+      describeAttack();
+    } catch (error) { notify(error.message); }
+  }
   if (routeName === 'demo') renderDemo();
 }
 window.addEventListener('hashchange', route);

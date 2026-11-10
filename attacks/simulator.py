@@ -16,6 +16,7 @@ from crypto.primitives import signature_keypair, sign
 from policy.engine import load_policy
 from protocol.identity import Identity, b64, canonical, unb64
 from protocol.session import Peer, complete_handshake
+from server.relay import verify_registration
 from attacks.mutations import SCENARIOS, mutate_packet
 
 # SCENARIOS remains the V1 five-item public compatibility interface.
@@ -199,8 +200,7 @@ async def _interrupted_rekey(record: Callable[[str, str], None]) -> str:
     async def route(socket):
         name = None
         try:
-            hello = json.loads(await asyncio.wait_for(socket.recv(), 5))
-            name = hello["register"]
+            name, _, _ = await verify_registration(socket)
             clients[name] = socket
             await socket.send(json.dumps({"type": "registered", "name": name}))
             async for raw in socket:

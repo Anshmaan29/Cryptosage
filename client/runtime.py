@@ -17,6 +17,7 @@ from client.storage import MAX_HISTORY, MAX_SEEN
 from crypto.primitives import available_algorithms, versions
 from policy.engine import load_policy
 from protocol.identity import Identity, unb64, valid_name
+from protocol.registration import register_client
 from protocol.session import Peer, ReceiptExpectation
 
 
@@ -128,9 +129,8 @@ class Client:
             previous_fingerprint=previous_fingerprint,
         )
         if old and old != self.identity.trusted[name]:
-            self.peer.session = None
+            self._invalidate()
             self.peer.pending = None
-            self.ready.clear()
         self.event("verified", f"{name}: fingerprint explicitly pinned locally")
 
     def _save(self) -> None:
@@ -138,6 +138,7 @@ class Client:
 
     def _invalidate(self) -> None:
         self.peer.session = None
+        self.peer.previous.clear()
         self.ready.clear()
 
     def _mark_unconfirmed(self, keys: list[tuple[str, int]], reason: str) -> None:
@@ -205,7 +206,7 @@ class Client:
         )
 
     def _receive_message(self, packet: dict) -> dict:
-        session = self.peer.session
+        session = self.peer.receive_session(packet.get("sid"))
         if not session:
             raise ValueError("No authenticated session for this message")
         message_id, text = session.open_message(packet)
@@ -253,14 +254,7 @@ class Client:
                 async with connect(
                     self.relay_url, max_size=262_144, open_timeout=5, proxy=None
                 ) as socket:
-                    await socket.send(
-                        json.dumps(
-                            {"register": self.identity.name, "routing_status": True}
-                        )
-                    )
-                    registered = json.loads(await asyncio.wait_for(socket.recv(), 5))
-                    if registered != {"type": "registered", "name": self.identity.name}:
-                        raise ValueError("Relay registration failed")
+                    await register_client(socket, self.identity, routing_status=True)
                     self.socket, self.connected = socket, True
                     self.event("connected", "Connected to ciphertext relay")
                     while True:
@@ -319,7 +313,9 @@ class Client:
                                         "finish": "Initiator key confirmation verified; responder session established",
                                         "ack": "Responder final confirmation verified; initiator session established",
                                     }.get(packet.get("type"))
-                                    if stage:
+                                    if stage and (
+                                        packet.get("type") != "offer" or response
+                                    ):
                                         self.event("protocol", stage)
                                     if response:
                                         await socket.send(json.dumps(response))
@@ -376,8 +372,13 @@ class Client:
                     "Session changed; review the conversation before sending"
                 )
             self.peer.expire()
-            self.ready.clear()
+            pending = self.peer.pending
+            if expected_session_id is not None and pending:
+                offer = pending["offer"]
+                if remote in (offer["from"], offer["to"]):
+                    return {"status": "negotiating", "session_id": offer["sid"]}
             packet = self.peer.initiate(remote)
+            self.ready.clear()
             try:
                 await self.socket.send(json.dumps(packet))
             except (OSError, ConnectionClosed) as exc:
@@ -409,14 +410,21 @@ class Client:
             expected_peer, expected_session_id = session.peer, session.session_id
             needs_rekey = session.send_count >= session.rekey_interval
         if needs_rekey:
-            started = await self.establish(expected_peer, expected_session_id)
+            await self.establish(expected_peer, expected_session_id)
             try:
                 await asyncio.wait_for(self.ready.wait(), 10)
             except asyncio.TimeoutError as exc:
                 raise ValueError(
                     "Periodic re-key did not complete; message was not sent"
                 ) from exc
-            expected_session_id = started["session_id"]
+            renewed = self.peer.session
+            if (
+                not renewed
+                or renewed.peer != expected_peer
+                or renewed.session_id == expected_session_id
+            ):
+                raise ValueError("Periodic re-key did not establish a fresh session")
+            expected_session_id = renewed.session_id
             self.event("rekey", "Periodic post-quantum re-key completed")
         async with self.lock:
             session = self.peer.session

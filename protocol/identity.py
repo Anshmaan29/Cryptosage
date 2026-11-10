@@ -116,8 +116,11 @@ class Identity:
             if not isinstance(pin, str) or not re.fullmatch(r"[0-9a-f]{64}", pin):
                 raise ValueError("Invalid stored contact fingerprint")
 
+    def sign_bytes(self, value: bytes) -> bytes:
+        return sign(self._secret, value)
+
     def sign(self, value: dict) -> str:
-        return b64(sign(self._secret, canonical(value)))
+        return b64(self.sign_bytes(canonical(value)))
 
     def pin(
         self,
