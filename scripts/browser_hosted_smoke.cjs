@@ -52,6 +52,11 @@ async function exercise(browser, algorithm) {
     await b.getByRole('button', { name: /Join/ }).click();
     const waitForSession = () => Promise.all([a, b].map(page => page.locator('#state[data-ready="true"]').waitFor({ timeout: 30_000 })));
     await waitForSession();
+    for (const page of [a, b]) {
+      assert.match(await page.locator('#lab-fingerprint').textContent(), /^[a-f0-9]{64}$/);
+      assert.match(await page.locator('#lab-session-id').textContent(), /^[a-f0-9]{32}$/);
+      assert.match(await page.locator('#lab-events').textContent(), /Authenticated session confirmed/);
+    }
     for (const [from, to, marker] of [[a, b, 'First encrypted browser check 🔐'], [b, a, 'Second encrypted browser check']]) {
       await from.getByRole('textbox', { name: 'Message', exact: true }).fill(marker);
       await from.getByRole('button', { name: 'Send', exact: true }).click();

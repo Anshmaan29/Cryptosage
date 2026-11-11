@@ -1,4 +1,4 @@
-import { decode, derive, encode, getOqs, KEMS, random } from './crypto.mjs';
+import { decode, derive, encode, getOqs, hash, KEMS, random } from './crypto.mjs';
 import { Peer, roomId } from './protocol.mjs';
 
 const $ = id => document.getElementById(id);
@@ -12,6 +12,26 @@ let queue = Promise.resolve();
 let sending = false;
 const messages = [];
 const pending = new Map();
+const events = [];
+function event(detail) {
+  events.unshift({ time: new Date(), detail });
+  if (events.length > 40) events.pop();
+  const list = $('lab-events');
+  list.replaceChildren();
+  for (const entry of events) {
+    const row = document.createElement('li');
+    const time = document.createElement('time');
+    time.dateTime = entry.time.toISOString();
+    time.textContent = entry.time.toLocaleTimeString();
+    row.append(time, document.createTextNode(' · ' + entry.detail));
+    list.append(row);
+  }
+}
+function counts() {
+  const session = peer?.session;
+  $('lab-counts').textContent = session ? `${session.sendCount} sent · ${session.receiveCount} received` : 'No active session';
+}
+
 
 function notify(detail) {
   $('notice').textContent = detail;
@@ -23,6 +43,9 @@ function status(detail, ready = false) {
   $('state').dataset.ready = String(ready);
   $('lab-state').textContent = ready ? 'Authenticated' : detail;
   $('lab-kem').textContent = ready ? config.algorithm : 'Not negotiated';
+  $('lab-session-id').textContent = ready ? peer.session.sid : 'Not established';
+  if (!ready) $('lab-fingerprint').textContent = 'Not established';
+  counts();
   $('session-description').textContent = detail;
   $('message').disabled = !ready;
   $('send').disabled = !ready || sending;
@@ -65,6 +88,7 @@ function enqueue(action) {
 }
 
 function reset(detail) {
+  event(detail);
   peer?.reset();
   clearTimeout(handshakeTimer);
   for (const item of pending.values()) {
@@ -94,6 +118,7 @@ async function incoming(raw) {
   const packet = JSON.parse(raw);
   if (packet?.relay === 'ready') {
     if (role === 'alice' && !peer.pending && !peer.session) {
+      event('Starting signed key negotiation');
       status('Authenticating your guest');
       watchHandshake();
       wire(await peer.offer());
@@ -110,7 +135,7 @@ async function incoming(raw) {
     return;
   }
   const outcome = await peer.receive(packet);
-  if (outcome.message) display(outcome.message, 'received');
+  if (outcome.message) { display(outcome.message, 'received'); event('Authenticated message received'); counts(); }
   if (outcome.reply) wire(outcome.reply);
   if (packet.type === 'offer') watchHandshake();
   if (outcome.ready) {
@@ -120,6 +145,9 @@ async function incoming(raw) {
     for (const message of messages) {
       if (message.status === 'Delivery unconfirmed') update(message, message.status);
     }
+    const fingerprint = await hash(decode(peer.roomState.pin, 1952));
+    $('lab-fingerprint').textContent = Array.from(fingerprint, byte => byte.toString(16).padStart(2, '0')).join('');
+    event('Authenticated session confirmed with ' + config.algorithm);
     notify('');
   }
   if (outcome.receipt) {
@@ -130,6 +158,7 @@ async function incoming(raw) {
     clearTimeout(entry.timer);
     pending.delete(key);
     update(entry.message, 'Delivered');
+    event('Authenticated delivery receipt received');
   }
 }
 
@@ -175,6 +204,8 @@ async function send(existing) {
     const message = existing || { id: encode(random(16)), text: $('message').value.trim() };
     if (!message.text) return;
     const { packet, hash } = await peer.seal(message);
+    counts();
+    event('Encrypted message sent to relay');
     message.attempt = session.sid;
     if (!existing) display(message, 'sent');
     update(message, 'Pending');

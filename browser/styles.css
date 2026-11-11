@@ -76,3 +76,5 @@ h1,h2{font:400 clamp(1.8rem,4vw,3rem)/1.05 var(--display);letter-spacing:-.03em;
 .lab-panel th,.lab-panel td{border-bottom:1px solid var(--line);text-align:left;padding:.5rem .3rem;font-variant-numeric:tabular-nums}
 .lab-panel th:not(:first-child),.lab-panel td:not(:first-child){text-align:right}
 @media(max-width:45rem){.lab-grid{grid-template-columns:minmax(0,1fr)}.top nav{order:3;flex-basis:100%}}
+
+.lab-events{margin-top:1rem}.lab-events ol{padding-left:1.5rem;color:var(--muted);max-height:16rem;overflow:auto}.lab-events li{padding:.3rem 0;overflow-wrap:anywhere}.lab-events time{font-variant-numeric:tabular-nums;color:var(--ink)}
