@@ -66,3 +66,58 @@ test('wrong invite key, modified negotiation and invalid signatures fail', async
   const signature = oqs.sign(left.identity.secret, bytes('signed'));
   assert.equal(oqs.verify(left.identity.public, bytes('changed'), signature), false);
 });
+
+const { defaultPolicy } = await import('../.build/browser-site/policy.mjs');
+
+async function policyPair(initiator, responder) {
+  const [left, right] = await pair('ML-KEM-768');
+  return [new Peer({ ...left, policy: initiator }), new Peer({ ...right, policy: responder })];
+}
+
+test('browser policies select ML-KEM unless both peers opt in to HQC', async () => {
+  const preferred = { ...defaultPolicy, experimental: true, preferred: 'HQC-3' };
+  const [alice, bob] = await policyPair(preferred, defaultPolicy);
+  await handshake(alice, bob);
+  assert.equal(alice.session.algorithm, 'ML-KEM-768');
+  assert.equal(bob.session.algorithm, 'ML-KEM-768');
+});
+
+test('different signed policies negotiate HQC and confirm authenticated delivery', async () => {
+  const preferred = { ...defaultPolicy, experimental: true, preferred: 'HQC-3' };
+  const [alice, bob] = await policyPair(preferred, { ...defaultPolicy, experimental: true });
+  const offer = await alice.offer();
+  const response = (await bob.receive(offer)).reply;
+  const forgedSelection = await bob.signed({
+    ...Object.fromEntries(Object.entries(response).filter(([field]) => !['proof', 'signature'].includes(field))),
+    algorithm: 'ML-KEM-768',
+  });
+  await assert.rejects(() => alice.receive(forgedSelection), /authenticated policy decision/);
+  const finish = (await alice.receive(response)).reply;
+  const ack = await bob.receive(finish);
+  const ready = await alice.receive(ack.reply);
+  assert.equal(alice.session.algorithm, 'HQC-3');
+  assert.deepEqual(ready.decision, ack.decision);
+  const message = { id: encode(random(16)), text: 'Negotiated test message' };
+  const { packet, hash } = await alice.seal(message);
+  const received = await bob.receive(packet);
+  assert.deepEqual(received.message, message);
+  assert.equal((await alice.receive(received.reply)).receipt.hash, hash);
+});
+
+test('incompatible policies return an authenticated refusal and erase unused keys', async () => {
+  const [alice, bob] = await policyPair(defaultPolicy, { ...defaultPolicy, minimumLevel: 5 });
+  const offer = await alice.offer();
+  const unused = alice.pending.keys['ML-KEM-768'];
+  await assert.rejects(() => bob.receive({ ...offer, policy: { ...offer.policy, minimumLevel: 5 } }), /Invitation authentication/);
+  const rejected = await bob.receive(offer);
+  const decline = rejected.reply;
+  assert.equal(decline.type, 'decline');
+  await assert.rejects(() => alice.receive({ ...decline, policy: defaultPolicy }), /Invitation authentication/);
+  const outcome = await alice.receive(decline);
+  assert.equal(outcome.refused, true);
+  assert.deepEqual(outcome.decision, rejected.decision);
+  assert.ok(unused.every(byte => byte === 0));
+  assert.equal(alice.session, null);
+  assert.equal(bob.session, null);
+  await assert.rejects(() => bob.receive(offer), /replayed handshake/);
+});

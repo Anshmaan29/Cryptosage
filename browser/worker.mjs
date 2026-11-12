@@ -34,7 +34,7 @@ export default {
   },
 };
 
-const routed = new Set(['offer', 'response', 'finish', 'ack', 'message', 'receipt']);
+const routed = new Set(['offer', 'response', 'decline', 'finish', 'ack', 'message', 'receipt']);
 const other = role => role === 'alice' ? 'bob' : 'alice';
 
 export class ChatRoom extends DurableObject {

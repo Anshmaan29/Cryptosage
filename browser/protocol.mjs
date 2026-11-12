@@ -1,6 +1,9 @@
 import { authenticate, bytes, canonical, crypt, decode, derive, encode, hash, KEMS, random } from './crypto.mjs';
 
-const VERSION = 'crytosage/browser/1';
+import { eligibleAlgorithms, selectKeyExchange, validatePolicy } from './policy.mjs';
+
+const LEGACY_VERSION = 'crytosage/browser/1';
+const POLICY_VERSION = 'crytosage/browser/2';
 const MAX_COUNTER = 100;
 const MAX_TEXT = 16_384;
 const MAX_SEEN = 512;
@@ -10,13 +13,13 @@ export const randomId = () => hex(random(16));
 export const roomId = async secret => hex(await hash(bytes('crytosage/room/' + encode(secret)))).slice(0, 32);
 
 function fields(packet, keys) {
-  if (!packet || typeof packet !== 'object' || Object.keys(packet).length !== keys.length ||
+  if (!packet || typeof packet !== 'object' || Array.isArray(packet) || Object.keys(packet).length !== keys.length ||
       !keys.every(key => Object.hasOwn(packet, key))) throw new Error('Malformed protocol envelope');
 }
 
 export class Peer {
-  constructor({ oqs, identity, inviteKey, role, room, algorithm, roomState }) {
-    if (!Object.hasOwn(KEMS, algorithm)) throw new Error('Unknown KEM');
+  constructor({ oqs, identity, inviteKey, role, room, algorithm, policy, roomState }) {
+    if (policy === undefined && !Object.hasOwn(KEMS, algorithm)) throw new Error('Unknown KEM');
     this.oqs = oqs;
     this.identity = identity;
     this.inviteKey = inviteKey;
@@ -24,11 +27,13 @@ export class Peer {
     this.remote = role === 'alice' ? 'bob' : 'alice';
     this.room = room;
     this.algorithm = algorithm;
+    this.policy = policy === undefined ? undefined : validatePolicy(policy);
+    this.version = this.policy ? POLICY_VERSION : LEGACY_VERSION;
     this.roomState = roomState;
   }
 
   header(type, sid) {
-    return { type, v: VERSION, room: this.room, sid, from: this.role, to: this.remote };
+    return { type, v: this.version, room: this.room, sid, from: this.role, to: this.remote };
   }
 
   async signed(body) {
@@ -38,10 +43,10 @@ export class Peer {
   }
 
   async verify(packet, specific) {
-    fields(packet, ['type', 'v', 'room', 'sid', 'from', 'to', 'identity', 'algorithm', 'signature', 'proof', ...specific]);
+    fields(packet, ['type', 'v', 'room', 'sid', 'from', 'to', 'identity', 'signature', 'proof', ...specific]);
     const { proof, ...signed } = packet;
     const { signature, ...body } = signed;
-    if (body.algorithm !== this.algorithm) throw new Error('Peer policy selected a different KEM');
+    if (!this.policy && body.algorithm !== this.algorithm) throw new Error('Peer policy selected a different KEM');
     if (!await authenticate(this.inviteKey, signed, proof)) throw new Error('Invitation authentication failed');
     if (this.roomState.pin && this.roomState.pin !== body.identity) throw new Error('Peer identity changed. Create a new private chat.');
     if (!this.oqs.verify(body.identity, bytes(canonical(body)), signature)) throw new Error('ML-DSA-65 signature rejected');
@@ -49,7 +54,7 @@ export class Peer {
   }
 
   reset() {
-    this.pending?.kem?.fill(0);
+    for (const key of Object.values(this.pending?.keys ?? {})) key.fill(0);
     this.pending?.root?.fill(0);
     this.pending = null;
     this.session?.sending.fill(0);
@@ -62,54 +67,106 @@ export class Peer {
   async offer() {
     if (this.role !== 'alice' || this.pending) throw new Error('Handshake already in progress');
     this.reset();
-    const kem = this.oqs.keypair(this.algorithm);
-    const body = { ...this.header('offer', randomId()), algorithm: this.algorithm,
-      identity: this.identity.public, publicKey: kem.public, time: Date.now() };
-    this.pending = { offer: body, kem: kem.secret };
+    const body = { ...this.header('offer', randomId()), identity: this.identity.public, time: Date.now() };
+    const keys = {};
+    this.pending = { offer: body, keys };
+    if (this.policy) {
+      body.policy = this.policy;
+      body.publicKeys = {};
+      for (const name of eligibleAlgorithms(this.policy)) {
+        const kem = this.oqs.keypair(name);
+        body.publicKeys[name] = kem.public;
+        keys[name] = kem.secret;
+      }
+    } else {
+      const kem = this.oqs.keypair(this.algorithm);
+      body.algorithm = this.algorithm;
+      body.publicKey = kem.public;
+      keys[this.algorithm] = kem.secret;
+    }
     return this.signed(body);
   }
 
   async deriveRoot(secret, offer, response) {
     try {
-      return await derive(secret, 'root', await hash(bytes(canonical({ offer, response }))));
+      return await derive(secret, this.policy ? 'policy root' : 'root', await hash(bytes(canonical({ offer, response }))));
     } finally {
       secret.fill(0);
     }
   }
 
   async receive(packet) {
-    if (packet.v !== VERSION || packet.room !== this.room || packet.from !== this.remote ||
+    if (packet?.v !== this.version || packet.room !== this.room || packet.from !== this.remote ||
         packet.to !== this.role || typeof packet.sid !== 'string' || !/^[a-f0-9]{32}$/.test(packet.sid)) {
       throw new Error('Packet is outside the authenticated room or identity');
     }
     if (packet.type === 'offer' && this.role === 'bob' && !this.pending) {
-      const offer = await this.verify(packet, ['publicKey', 'time']);
+      const offer = await this.verify(packet, this.policy
+        ? ['policy', 'publicKeys', 'time']
+        : ['algorithm', 'publicKey', 'time']);
       const recent = Number.isSafeInteger(offer.time) && Math.abs(Date.now() - offer.time) < 60_000;
       if (!recent || this.roomState.offers.has(offer.sid)) throw new Error('Expired or replayed handshake');
       if (this.roomState.offers.size >= 128) throw new Error('Room handshake limit reached');
-      const { ciphertext, secret } = this.oqs.encapsulate(this.algorithm, offer.publicKey);
-      const response = { ...this.header('response', offer.sid), algorithm: this.algorithm, identity: this.identity.public,
-        offerHash: encode(await hash(bytes(canonical(offer)))), ciphertext };
+      const response = { ...this.header('response', offer.sid), identity: this.identity.public,
+        offerHash: encode(await hash(bytes(canonical(offer)))) };
+      let decision;
+      let algorithm = this.algorithm;
+      let publicKey = offer.publicKey;
+      if (this.policy) {
+        decision = selectKeyExchange(offer.policy, this.policy);
+        const names = eligibleAlgorithms(offer.policy);
+        fields(offer.publicKeys, names);
+        for (const name of names) decode(offer.publicKeys[name], KEMS[name].public);
+        response.policy = this.policy;
+        algorithm = decision.selected;
+        if (!algorithm) {
+          this.roomState.offers.add(offer.sid);
+          this.reset();
+          return { decision, refused: true, reply: await this.signed({ ...response, type: 'decline' }) };
+        }
+        publicKey = offer.publicKeys[algorithm];
+      }
+      const { ciphertext, secret } = this.oqs.encapsulate(algorithm, publicKey);
+      Object.assign(response, { algorithm, ciphertext });
       const root = await this.deriveRoot(secret, offer, response);
       this.roomState.offers.add(offer.sid);
       this.reset();
-      this.pending = { offer, root, identity: offer.identity };
+      this.pending = { offer, root, identity: offer.identity, algorithm, decision };
       const confirmation = (await this.confirm('responder', offer.sid, root)).confirmation;
       return { reply: await this.signed({ ...response, confirmation }) };
     }
     const pending = this.pending;
-    if (packet.type === 'response' && this.role === 'alice' && pending?.kem && pending.offer.sid === packet.sid) {
-      const { confirmation, ...response } = await this.verify(packet, ['offerHash', 'ciphertext', 'confirmation']);
+    if ((packet.type === 'response' || (this.policy && packet.type === 'decline')) &&
+        this.role === 'alice' && pending?.keys && pending.offer.sid === packet.sid) {
+      const declined = packet.type === 'decline';
+      const specific = declined ? ['offerHash', 'policy'] : ['algorithm', 'offerHash', 'ciphertext', 'confirmation'];
+      if (this.policy && !declined) specific.push('policy');
+      const { confirmation, ...response } = await this.verify(packet, specific);
       if (response.offerHash !== encode(await hash(bytes(canonical(pending.offer))))) throw new Error('Offer transcript mismatch');
-      const secret = this.oqs.decapsulate(this.algorithm, pending.kem, response.ciphertext);
+      let decision;
+      if (this.policy) {
+        decision = selectKeyExchange(pending.offer.policy, response.policy);
+        if (declined && decision.selected === null) {
+          this.reset();
+          return { decision, refused: true };
+        }
+        if (declined || response.algorithm !== decision.selected || !decision.selected) {
+          throw new Error('Response does not match the authenticated policy decision');
+        }
+      }
+      const algorithm = response.algorithm;
+      const secret = this.oqs.decapsulate(algorithm, pending.keys[algorithm], response.ciphertext);
       const root = await this.deriveRoot(secret, pending.offer, response);
       const responder = { ...this.header('responder', packet.sid), from: this.remote, to: this.role };
-      if (!await this.authenticateConfirmation(root, responder, confirmation)) {
-        root.fill(0);
-        throw new Error('Responder key confirmation failed');
+      let confirmed = false;
+      try {
+        confirmed = await this.authenticateConfirmation(root, responder, confirmation);
+        if (!confirmed) throw new Error('Responder key confirmation failed');
+      } finally {
+        if (!confirmed) root.fill(0);
       }
-      pending.kem.fill(0);
-      this.pending = { offer: pending.offer, root, identity: response.identity };
+      for (const key of Object.values(pending.keys)) key.fill(0);
+      this.pending = { offer: pending.offer, root, identity: response.identity, algorithm, decision };
       return { reply: await this.confirm('finish', packet.sid, root) };
     }
     const expected = this.role === 'alice' ? 'ack' : 'finish';
@@ -120,6 +177,7 @@ export class Peer {
       const reply = this.role === 'bob' ? await this.confirm('ack', packet.sid, pending.root) : null;
       this.session = {
         sid: packet.sid,
+        algorithm: pending.algorithm,
         sending: await derive(pending.root, this.role + '/chain'),
         receiving: await derive(pending.root, this.remote + '/chain'),
         issueReceipt: await derive(pending.root, this.role + '/receipts'),
@@ -129,7 +187,7 @@ export class Peer {
       this.roomState.pin = pending.identity;
       pending.root.fill(0);
       this.pending = null;
-      return { ready: true, reply };
+      return { ready: true, reply, decision: pending.decision };
     }
     if (packet.type === 'message') return this.open(packet);
     if (packet.type === 'receipt') return this.checkReceipt(packet);

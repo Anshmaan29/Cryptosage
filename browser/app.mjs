@@ -1,10 +1,13 @@
 import { decode, derive, encode, getOqs, hash, KEMS, random } from './crypto.mjs';
 import { Peer, roomId } from './protocol.mjs';
+import { defaultPolicy, eligibleAlgorithms, validatePolicy } from './policy.mjs';
 
 const $ = id => document.getElementById(id);
 const fragment = new URLSearchParams(location.hash.slice(1));
 const invite = fragment.get('join');
 const requested = fragment.get('kem');
+const inviteVersion = fragment.get('v');
+const legacyInvite = Boolean(invite && inviteVersion === null && requested);
 if (location.hash) history.replaceState(null, '', location.pathname);
 const role = invite ? 'bob' : 'alice';
 let connection, peer, config, retryTimer, handshakeTimer;
@@ -13,6 +16,117 @@ let sending = false;
 const messages = [];
 const pending = new Map();
 const events = [];
+const policyChecks = [...document.querySelectorAll('input[name="allowed-kem"]')];
+
+function readPolicy() {
+  return validatePolicy({
+    allowed: policyChecks.filter(input => input.checked).map(input => input.value),
+    minimumLevel: Number($('minimum-level').value),
+    experimental: $('allow-experimental').checked,
+    preferred: $('preferred-kem').value,
+  });
+}
+
+function policySummary(policy) {
+  const eligible = eligibleAlgorithms(policy);
+  return 'Category ' + policy.minimumLevel + ' minimum · ' +
+    (eligible.length ? eligible.join(', ') : 'No eligible key exchanges');
+}
+
+function previewPolicy() {
+  const policy = readPolicy();
+  $('policy-eligibility').textContent = policySummary(policy);
+  $('policy-preview').textContent = legacyInvite
+    ? 'This invite uses ' + requested + ' under the original room protocol.'
+    : policySummary(policy);
+}
+
+function showDecision(decision) {
+  $('policy-peers').hidden = !decision;
+  $('policy-decision-reason').hidden = !decision;
+  $('policy-candidates').replaceChildren();
+  if (!decision) {
+    $('policy-decision').textContent = legacyInvite
+      ? 'This invite uses the original room protocol.'
+      : 'Waiting for signed policies from both peers.';
+    return;
+  }
+  $('policy-decision').textContent = decision.selected
+    ? decision.selected + ' selected'
+    : 'No mutually allowed key exchange';
+  const eligible = decision.candidates.filter(candidate => !candidate.initiator && !candidate.responder);
+  const winner = eligible.find(candidate => candidate.name === decision.selected);
+  let explanation = 'Each candidate below shows which peer excluded it.';
+  if (winner) {
+    if (eligible.length === 1) explanation = 'This was the only key exchange both peers allowed.';
+    else if (eligible.some(candidate => candidate !== winner && candidate.votes === winner.votes)) {
+      explanation = 'Peer preferences tied, so the standard algorithm took priority.';
+    } else {
+      explanation = 'This key exchange received more explicit peer preferences.';
+    }
+  }
+  $('policy-decision-reason').textContent = explanation;
+  $('initiator-policy').textContent = policySummary(decision.initiator);
+  $('responder-policy').textContent = policySummary(decision.responder);
+  for (const candidate of decision.candidates) {
+    const row = document.createElement('li');
+    const name = document.createElement('strong');
+    name.textContent = candidate.name;
+    const reason = document.createElement('span');
+    if (candidate.initiator || candidate.responder) {
+      reason.textContent = [
+        candidate.initiator && 'Room creator · ' + candidate.initiator,
+        candidate.responder && 'Guest · ' + candidate.responder,
+      ].filter(Boolean).join(' / ');
+    } else {
+      const preferences = candidate.votes === 1 ? '1 peer preference' : candidate.votes + ' peer preferences';
+      reason.textContent = 'Allowed by both · ' + preferences;
+      if (candidate.name === decision.selected) {
+        name.dataset.selected = 'true';
+        reason.textContent += ' · Selected';
+      }
+    }
+    row.append(name, reason);
+    $('policy-candidates').append(row);
+  }
+}
+
+function restorePolicy() {
+  let policy = defaultPolicy;
+  try {
+    const saved = localStorage.getItem('cryptosage-key-exchange-policy');
+    if (saved) policy = validatePolicy(JSON.parse(saved));
+  } catch {
+    // Storage can be disabled or contain a policy from a different catalog.
+  }
+  for (const input of policyChecks) input.checked = policy.allowed.includes(input.value);
+  $('minimum-level').value = String(policy.minimumLevel);
+  $('allow-experimental').checked = policy.experimental;
+  $('preferred-kem').value = policy.preferred;
+  previewPolicy();
+  showDecision();
+}
+restorePolicy();
+$('policy-form').addEventListener('change', previewPolicy);
+$('policy-form').addEventListener('submit', event => {
+  event.preventDefault();
+  enqueue(async () => {
+    const policy = readPolicy();
+    let saved = true;
+    try { localStorage.setItem('cryptosage-key-exchange-policy', JSON.stringify(policy)); }
+    catch { saved = false; }
+    if (config?.policy) {
+      config.policy = policy;
+      $('policy-save-status').textContent = saved ? 'Policy saved. Starting a fresh handshake.' : 'Policy applied to this room.';
+      await connect();
+    } else {
+      $('policy-save-status').textContent = saved
+        ? 'Policy saved for new rooms and invites.'
+        : 'Policy applies while this tab is open.';
+    }
+  });
+});
+
 function event(detail) {
   events.unshift({ time: new Date(), detail });
   if (events.length > 40) events.pop();
@@ -42,9 +156,9 @@ function status(detail, ready = false) {
   $('state').textContent = ready ? 'Authenticated' : detail;
   $('state').dataset.ready = String(ready);
   $('lab-state').textContent = ready ? 'Authenticated' : detail;
-  $('lab-kem').textContent = ready ? config.algorithm : 'Not negotiated';
-  $('lab-session-id').textContent = ready ? peer.session.sid : 'Not established';
-  if (!ready) $('lab-fingerprint').textContent = 'Not established';
+  $('lab-kem').textContent = ready ? peer.session.algorithm : 'Pending';
+  $('lab-session-id').textContent = ready ? peer.session.sid : 'Pending';
+  if (!ready) $('lab-fingerprint').textContent = 'Pending';
   counts();
   $('session-description').textContent = detail;
   $('message').disabled = !ready;
@@ -135,19 +249,28 @@ async function incoming(raw) {
     return;
   }
   const outcome = await peer.receive(packet);
+  if (outcome.refused) {
+    if (outcome.reply) wire(outcome.reply);
+    showDecision(outcome.decision);
+    reset('No mutually allowed key exchange');
+    notify('Open Policy manager to inspect the refusal. Save a revised policy to try again.');
+    return;
+  }
   if (outcome.message) { display(outcome.message, 'received'); event('Authenticated message received'); counts(); }
   if (outcome.reply) wire(outcome.reply);
   if (packet.type === 'offer') watchHandshake();
   if (outcome.ready) {
     clearTimeout(handshakeTimer);
     $('reconnect').hidden = false;
-    status(config.algorithm + ' · ML-DSA-65 · AES-256-GCM', true);
+    const algorithm = peer.session.algorithm;
+    const fingerprint = await hash(decode(peer.roomState.pin, 1952));
+    $('lab-fingerprint').textContent = Array.from(fingerprint, byte => byte.toString(16).padStart(2, '0')).join('');
+    showDecision(outcome.decision);
+    event('Authenticated session confirmed with ' + algorithm);
+    status(algorithm + ' · ML-DSA-65 · AES-256-GCM', true);
     for (const message of messages) {
       if (message.status === 'Delivery unconfirmed') update(message, message.status);
     }
-    const fingerprint = await hash(decode(peer.roomState.pin, 1952));
-    $('lab-fingerprint').textContent = Array.from(fingerprint, byte => byte.toString(16).padStart(2, '0')).join('');
-    event('Authenticated session confirmed with ' + config.algorithm);
     notify('');
   }
   if (outcome.receipt) {
@@ -167,6 +290,8 @@ async function connect() {
   const previous = connection;
   connection = null;
   reset('Connecting to the relay');
+  showDecision();
+  notify('');
   if (previous?.readyState < WebSocket.CLOSED) {
     await new Promise(resolve => {
       const timer = setTimeout(resolve, 800);
@@ -205,12 +330,12 @@ async function send(existing) {
     if (!message.text) return;
     const { packet, hash } = await peer.seal(message);
     counts();
-    event('Encrypted message sent to relay');
     message.attempt = session.sid;
     if (!existing) display(message, 'sent');
     update(message, 'Pending');
     try {
       wire(packet);
+      event('Encrypted message sent to relay');
     } catch (error) {
       update(message, 'Delivery unconfirmed');
       reset('Send interrupted');
@@ -233,23 +358,30 @@ $('start').addEventListener('click', () => {
   $('start').disabled = true;
   enqueue(async () => {
     try {
-      const algorithm = role === 'alice' ? $('algorithm').value : requested;
-      if (!Object.hasOwn(KEMS, algorithm)) throw new Error('The invitation uses an unsupported key exchange');
+      if (invite && inviteVersion !== '2' && !(legacyInvite && Object.hasOwn(KEMS, requested))) {
+        throw new Error('This invitation uses an unsupported protocol or key exchange');
+      }
+      if (legacyInvite && !eligibleAlgorithms(readPolicy()).includes(requested)) {
+        throw new Error('Allow ' + requested + ' in Policy manager before joining this invite');
+      }
       const secret = invite ? decode(invite.replaceAll('-', '+').replaceAll('_', '/') + '=', 32) : random(32);
       const room = await roomId(secret);
       const inviteKey = await derive(secret, 'invite authentication');
       const oqs = await getOqs();
-      config = { oqs, identity: oqs.identity(), inviteKey, role, room, algorithm, roomState: { offers: new Set(), seen: new Map() } };
+      config = { oqs, identity: oqs.identity(), inviteKey, role, room, roomState: { offers: new Set(), seen: new Map() } };
+      if (legacyInvite) config.algorithm = requested;
+      else config.policy = readPolicy();
       if (role === 'alice') {
         const link = new URL(location.origin);
         const share = encode(secret).replace(/=$/, '').replaceAll('+', '-').replaceAll('/', '_');
-        link.hash = new URLSearchParams({ join: share, kem: algorithm });
+        link.hash = new URLSearchParams({ join: share, v: '2' });
         $('invite-link').value = link.href;
         $('invite').hidden = false;
       }
       secret.fill(0);
       $('lobby').hidden = $('notes').hidden = true;
       $('chat').hidden = false;
+      if (!legacyInvite) $('apply-policy').textContent = 'Save policy and reconnect';
       await connect();
     } finally {
       $('start').disabled = false;
@@ -279,8 +411,9 @@ $('message').addEventListener('keydown', event => {
 });
 if (invite) {
   $('hero-title').textContent = 'Join a private chat';
-  $('intro').textContent = 'You were invited to use ' + (Object.hasOwn(KEMS, requested) ? requested : 'an unknown key exchange') + '. Join only if you trust the sender.';
-  $('algorithm-label').hidden = $('algorithm').hidden = true;
-  $('start').textContent = requested === 'HQC-3' ? 'Join with experimental HQC-3' : 'Join private chat';
+  $('intro').textContent = legacyInvite
+    ? 'This invite uses a fixed key exchange. Join only if you trust the sender.'
+    : 'Check your policy and join only if you trust the sender.';
+  $('start').textContent = 'Join private chat';
   $('notes').hidden = true;
 }

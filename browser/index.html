@@ -3,75 +3,183 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="Cryptosage browser prototype. Open a private room and send an authenticated, encrypted message.">
-  <title>Cryptosage | Private chat</title>
+  <meta name="description" content="Create an encrypted room, negotiate a key exchange, and examine real browser cryptography.">
+  <title>Cryptosage | Security workspace</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <script type="module" src="/app.mjs"></script>
   <script type="module" src="/lab.mjs"></script>
 </head>
 <body>
+  <a class="skip-link" href="#workspace">Skip to workspace</a>
   <header class="top">
     <a href="/" class="brand"><span aria-hidden="true"></span>Cryptosage</a>
-    <nav aria-label="Workspace"><button type="button" id="show-messages" aria-pressed="true">Messages</button> <button type="button" id="show-lab" aria-pressed="false">Security lab</button></nav>
     <span class="pill" id="state" role="status">Ready to create a chat</span>
   </header>
-  <main>
-    <section id="lobby" class="hero" aria-labelledby="hero-title">
-      <div>
-        <h1 id="hero-title">Private chat. Real cryptography.</h1>
-        <p id="intro">Create a room and share its invite with one person. Both devices do their own cryptography in the browser.</p>
-        <label id="algorithm-label" for="algorithm">Key exchange</label>
-        <select id="algorithm">
-          <option value="ML-KEM-768">ML-KEM-768</option>
-          <option value="HQC-3">HQC-3 (experimental)</option>
-        </select>
-        <button class="primary" id="start">Create private chat</button>
-        <p class="muted">Research prototype. Use test messages.</p>
-      </div>
-      <svg class="hero-graphic" viewBox="0 0 500 310" aria-hidden="true" focusable="false">
-        <path class="guide" d="M24 155h452M250 18v274"/>
-        <rect class="flight flight-a" x="38" y="101" width="150" height="108" rx="14"/>
-        <rect class="flight flight-b" x="128" y="62" width="150" height="108" rx="14"/>
-        <rect class="flight flight-c" x="222" y="140" width="150" height="108" rx="14"/>
-        <rect class="flight flight-d" x="312" y="101" width="150" height="108" rx="14"/>
-        <path class="lock" d="M233 148v-12a17 17 0 0 1 34 0v12m-39 0h44v38h-44zm22 14v10"/>
-      </svg>
-    </section>
-    <section class="notes" id="notes" aria-labelledby="notes-title">
-      <h2 id="notes-title">Open the invite on a second device</h2>
-      <p>Share it directly with your intended peer. The invite authorizes one guest and carries the secret the browsers use to verify each other. Reloading ends your browser session.</p>
-    </section>
-    <section id="chat" class="chat" hidden aria-labelledby="chat-title">
-      <header class="chat-head">
-        <div><h1 id="chat-title">Private chat</h1><p id="session-description">Waiting for the second device</p></div>
-        <div class="room-actions"><button id="reconnect" type="button" hidden>Reconnect</button><a href="/">Leave chat</a></div>
-      </header>
-      <div class="invite" id="invite" hidden>
-        <div><strong>Invite the other device</strong><p>Send this link privately to one person. Anyone with it can join.</p></div>
-        <label class="sr-only" for="invite-link">Private invite link</label>
-        <input id="invite-link" readonly>
-        <button id="copy" type="button">Copy invite</button>
-      </div>
-      <ol class="messages" id="messages" aria-label="Conversation" aria-live="polite"></ol>
-      <form class="composer" id="compose">
-        <label class="sr-only" for="message">Message</label>
-        <textarea id="message" rows="2" maxlength="16384" placeholder="Wait for the authenticated session" disabled></textarea>
-        <button class="primary" id="send" type="submit" disabled>Send</button>
-      </form>
-    </section>
-    <section class="lab" id="lab" hidden aria-labelledby="lab-title">
-      <div class="lab-heading"><div><h1 id="lab-title">Security lab</h1><p>Inspect this browser session and run real local experiments.</p></div><span class="lab-tag">Browser edition</span></div>
-      <div class="lab-grid">
-        <section class="lab-panel"><h2>Session</h2><dl id="lab-session"><dt>State</dt><dd id="lab-state">No authenticated session</dd><dt>Key exchange</dt><dd id="lab-kem">Not negotiated</dd><dt>Identity</dt><dd>ML-DSA-65</dd><dt>Message protection</dt><dd>AES-256-GCM</dd><dt>Session identifier</dt><dd id="lab-session-id">Not established</dd><dt>Peer fingerprint</dt><dd id="lab-fingerprint">Not established</dd><dt>Messages</dt><dd id="lab-counts">No active session</dd></dl><p>The invite authenticates the room. Session keys and message history are held in browser memory.</p></section>
-        <section class="lab-panel"><h2>Policy</h2><p>Choose the key exchange when creating a room. A guest must explicitly join an experimental HQC-3 room. Both peers validate the choice in the signed handshake.</p><p>Browser policies apply to the current room. Native policy files and controls belong to the separate local application.</p></section>
-        <section class="lab-panel"><h2>Attack lab</h2><p>Run an isolated experiment using real signed browser protocol messages. Your active chat is not used.</p><label for="lab-attack">Scenario</label><select id="lab-attack"><option value="tamper">Ciphertext tampering</option><option value="replay">Message replay</option><option value="negotiation">Modified algorithm</option></select><button id="run-attack" type="button">Run isolated experiment</button><p id="attack-result" role="status">No experiment run yet.</p></section>
-        <section class="lab-panel"><h2>Browser benchmarks</h2><p>Measure key generation, encapsulation and decapsulation on this device with real liboqs operations.</p><button id="run-benchmark" type="button">Run benchmark</button><div id="benchmark-result" role="status">No measurements recorded.</div></section>
-      </div>
-      <section class="lab-panel lab-events"><h2>Protocol events</h2><p>Recent events observed by this browser. Packet contents and secret material are excluded.</p><ol id="lab-events" aria-live="polite"><li>No events recorded yet.</li></ol></section>
-    </section>
-    <p class="notice" id="notice" role="alert" hidden></p>
-  </main>
-  <footer class="foot"><span class="footer-line" aria-hidden="true"></span><span>Cryptosage browser prototype</span><a href="https://github.com/Anshmaan29/Cryptosage" target="_blank" rel="noopener noreferrer">Source on GitHub</a><a href="/licenses/liboqs.txt">liboqs license</a><a href="/">Start a new chat</a></footer>
+  <div class="workspace">
+    <nav class="workspace-nav" aria-label="Workspace">
+      <button type="button" data-view="messages" aria-current="page" aria-controls="view-messages">Messages</button>
+      <button type="button" data-view="policy" aria-controls="view-policy">Policy manager</button>
+      <button type="button" data-view="protocol" aria-controls="view-protocol">Protocol inspector</button>
+      <button type="button" data-view="attacks" aria-controls="view-attacks">Attack lab</button>
+      <button type="button" data-view="benchmarks" aria-controls="view-benchmarks">Benchmarks</button>
+      <button type="button" data-view="research" aria-controls="view-research">Research</button>
+    </nav>
+    <main id="workspace" tabindex="-1">
+      <section id="view-messages" data-page aria-label="Messages">
+        <section id="lobby" class="hero" aria-labelledby="hero-title">
+          <div>
+            <h1 id="hero-title">Open a private chat</h1>
+            <p id="intro">Invite one person. Each browser chooses which key exchanges it will accept.</p>
+            <p id="policy-preview" class="policy-preview"></p>
+            <div class="room-actions">
+              <button class="primary" id="start" type="button">Create private chat</button>
+              <button type="button" data-open-view="policy">Edit policy</button>
+            </div>
+          </div>
+          <svg class="hero-graphic" viewBox="0 0 500 310" aria-hidden="true" focusable="false">
+            <path class="guide" d="M24 155h452M250 18v274"/>
+            <rect class="flight flight-a" x="38" y="101" width="150" height="108" rx="14"/>
+            <rect class="flight flight-b" x="128" y="62" width="150" height="108" rx="14"/>
+            <rect class="flight flight-c" x="222" y="140" width="150" height="108" rx="14"/>
+            <rect class="flight flight-d" x="312" y="101" width="150" height="108" rx="14"/>
+            <path class="lock" d="M233 148v-12a17 17 0 0 1 34 0v12m-39 0h44v38h-44zm22 14v10"/>
+          </svg>
+        </section>
+        <section class="notes" id="notes" aria-labelledby="notes-title">
+          <h2 id="notes-title">Try it with two browsers</h2>
+          <ol>
+            <li>Open the invite in another browser profile or on another device.</li>
+            <li>Choose a policy in each browser, then join the room.</li>
+            <li>Send a test message, then inspect the exchange.</li>
+          </ol>
+        </section>
+        <section id="chat" class="chat" hidden aria-labelledby="chat-title">
+          <header class="chat-head">
+            <div><h1 id="chat-title">Private chat</h1><p id="session-description">Waiting for the second device</p></div>
+            <div class="room-actions">
+              <button type="button" data-open-view="protocol">Inspect session</button>
+              <button id="reconnect" type="button" hidden>Reconnect</button>
+              <a href="/">Leave chat</a>
+            </div>
+          </header>
+          <div class="invite" id="invite" hidden>
+            <div><strong>Invite the other device</strong><p>Share this link privately. Anyone with it can claim the guest slot.</p></div>
+            <label class="sr-only" for="invite-link">Private invite link</label>
+            <input id="invite-link" readonly>
+            <button id="copy" type="button">Copy invite</button>
+          </div>
+          <ol class="messages" id="messages" aria-label="Conversation" aria-live="polite"></ol>
+          <form class="composer" id="compose">
+            <label class="sr-only" for="message">Message</label>
+            <textarea id="message" rows="2" maxlength="16384" placeholder="Wait for the authenticated session" disabled></textarea>
+            <button class="primary" id="send" type="submit" disabled>Send</button>
+          </form>
+        </section>
+      </section>
+      <section id="view-policy" data-page class="page" hidden aria-labelledby="policy-title">
+        <header class="page-heading">
+          <h1 id="policy-title">Policy manager</h1>
+          <p>Set the rules this browser uses for its next handshake. Both peers must allow the selected key exchange.</p>
+        </header>
+        <div class="policy-layout">
+          <form id="policy-form" class="lab-panel policy-form">
+            <h2>This browser</h2>
+            <label for="minimum-level">Minimum security category</label>
+            <select id="minimum-level"><option value="3">Category 3</option><option value="5">Category 5 (no current match)</option></select>
+            <fieldset>
+              <legend>Allowed key exchanges</legend>
+              <label class="check-option"><input type="checkbox" name="allowed-kem" value="ML-KEM-768" checked><span><strong>ML-KEM-768</strong><small>Standard · Category 3</small></span></label>
+              <label class="check-option"><input type="checkbox" name="allowed-kem" value="HQC-3" checked><span><strong>HQC-3</strong><small>Experimental · Category 3</small></span></label>
+            </fieldset>
+            <label class="check-option"><input type="checkbox" id="allow-experimental"><span>Allow experimental key exchanges</span></label>
+            <label for="preferred-kem">Preferred key exchange</label>
+            <select id="preferred-kem"><option value="standard">Standard first</option><option value="ML-KEM-768">ML-KEM-768</option><option value="HQC-3">HQC-3</option></select>
+            <p id="policy-eligibility" role="status"></p>
+            <button class="primary" id="apply-policy" type="submit">Save policy</button>
+            <p id="policy-save-status" role="status"></p>
+          </form>
+          <section class="lab-panel decision-panel" aria-labelledby="decision-title">
+            <h2 id="decision-title">Negotiation decision</h2>
+            <p id="policy-decision" role="status">Waiting for signed policies from both peers.</p>
+            <p id="policy-decision-reason" hidden></p>
+            <dl id="policy-peers" hidden>
+              <dt>Room creator</dt><dd id="initiator-policy"></dd>
+              <dt>Guest</dt><dd id="responder-policy"></dd>
+            </dl>
+            <ul id="policy-candidates" class="policy-candidates"></ul>
+          </section>
+        </div>
+      </section>
+      <section id="view-protocol" data-page class="page" hidden aria-labelledby="protocol-title">
+        <header class="page-heading"><h1 id="protocol-title">Protocol inspector</h1><p>Follow the authenticated session and recent events from this browser.</p></header>
+        <div class="policy-layout">
+          <section class="lab-panel"><h2>Session details</h2>
+            <dl>
+              <dt>State</dt><dd id="lab-state">No authenticated session</dd>
+              <dt>Key exchange</dt><dd id="lab-kem">Pending</dd>
+              <dt>Identity signatures</dt><dd>ML-DSA-65</dd>
+              <dt>Message cipher</dt><dd>AES-256-GCM</dd>
+              <dt>Session identifier</dt><dd id="lab-session-id">Pending</dd>
+              <dt>Peer fingerprint</dt><dd id="lab-fingerprint">Pending</dd>
+              <dt>Messages</dt><dd id="lab-counts">No active session</dd>
+            </dl>
+          </section>
+          <section class="lab-panel lab-events"><h2>Protocol events</h2><ol id="lab-events" aria-live="polite"><li>No events recorded yet.</li></ol></section>
+        </div>
+      </section>
+      <section id="view-attacks" data-page class="page" hidden aria-labelledby="attacks-title">
+        <header class="page-heading"><h1 id="attacks-title">Attack lab</h1><p>Run controlled experiments with fresh, isolated browser peers.</p></header>
+        <section class="lab-panel experiment">
+          <h2>Test a protocol check</h2>
+          <label for="lab-attack">Scenario</label>
+          <select id="lab-attack">
+            <option value="tamper">Ciphertext tampering</option>
+            <option value="replay">Message replay</option>
+            <option value="negotiation">Modified negotiation policy</option>
+          </select>
+          <button class="primary" id="run-attack" type="button">Run isolated experiment</button>
+          <p id="attack-result" role="status">No experiment run yet.</p>
+        </section>
+      </section>
+      <section id="view-benchmarks" data-page class="page" hidden aria-labelledby="benchmarks-title">
+        <header class="page-heading"><h1 id="benchmarks-title">Benchmarks</h1><p>Time liboqs key generation, encapsulation, and decapsulation on this device.</p></header>
+        <section class="lab-panel experiment">
+          <h2>Compare key exchanges</h2>
+          <button class="primary" id="run-benchmark" type="button">Run benchmark</button>
+          <div id="benchmark-result" aria-live="polite"><p>No measurements recorded.</p></div>
+        </section>
+      </section>
+      <section id="view-research" data-page class="page" hidden aria-labelledby="research-title">
+        <header class="page-heading"><h1 id="research-title">Research</h1><p>Inspect how Cryptosage establishes a shared secret and verify the behavior yourself.</p></header>
+        <section class="lab-panel">
+          <h2>Guided demo</h2>
+          <ol class="research-steps">
+            <li><button type="button" data-open-view="policy">Set a policy</button><span>Choose what this browser can accept.</span></li>
+            <li><button type="button" data-open-view="messages">Open a room</button><span>Share the invite with a second browser and exchange a test message.</span></li>
+            <li><button type="button" data-open-view="protocol">Inspect the session</button><span>Check the fingerprint, negotiated key exchange, and delivery events.</span></li>
+            <li><button type="button" data-open-view="attacks">Run an attack</button><span>See which check rejects a modified or replayed packet.</span></li>
+            <li><button type="button" data-open-view="benchmarks">Measure performance</button><span>Compare both key exchanges on this device.</span></li>
+          </ol>
+        </section>
+        <section class="lab-panel research-links">
+          <h2>Project evidence</h2>
+          <ul>
+            <li><a href="https://github.com/Anshmaan29/Cryptosage/blob/main/docs/BROWSER-DEMO.md">Browser protocol and trust model</a></li>
+            <li><a href="https://github.com/Anshmaan29/Cryptosage/blob/main/docs/REPORT.md">B.Tech research report</a></li>
+            <li><a href="https://github.com/Anshmaan29/Cryptosage/tree/main/reports/final">Recorded macOS experiments</a></li>
+            <li><a href="https://csrc.nist.gov/pubs/fips/203/final">NIST ML-KEM standard</a></li>
+          </ul>
+        </section>
+      </section>
+      <p class="notice" id="notice" role="alert" hidden></p>
+    </main>
+  </div>
+  <footer class="foot">
+    <span class="footer-line" aria-hidden="true"></span>
+    <span>Cryptosage browser edition</span>
+    <a href="https://github.com/Anshmaan29/Cryptosage" target="_blank" rel="noopener noreferrer">Source on GitHub</a>
+    <a href="/licenses/liboqs.txt">liboqs license</a>
+  </footer>
 </body>
 </html>

@@ -1,8 +1,8 @@
 import loadOqs from './liboqs.mjs';
 
 export const KEMS = {
-  'ML-KEM-768': { public: 1184, secret: 2400, cipher: 1088 },
-  'HQC-3': { public: 4514, secret: 4602, cipher: 8978 },
+  'ML-KEM-768': { public: 1184, secret: 2400, cipher: 1088, level: 3, experimental: false },
+  'HQC-3': { public: 4514, secret: 4602, cipher: 8978, level: 3, experimental: true },
 };
 
 const signature = { public: 1952, secret: 4032, bytes: 3309 };
@@ -27,6 +27,7 @@ export function decode(text, size) {
 
 export function canonical(value) {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
   return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + canonical(value[key])).join(',') + '}';
 }
 

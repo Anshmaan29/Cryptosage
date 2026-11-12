@@ -1,24 +1,22 @@
 import { derive, encode, getOqs, random } from './crypto.mjs';
 import { Peer, roomId } from './protocol.mjs';
+import { defaultPolicy } from './policy.mjs';
 
 const $ = id => document.getElementById(id);
-const views = ['lobby', 'notes', 'chat'];
-let priorVisibility = [];
-
-$('show-lab').addEventListener('click', () => {
-  priorVisibility = views.map(id => $(id).hidden);
-  for (const id of views) $(id).hidden = true;
-  $('lab').hidden = false;
-  $('show-lab').setAttribute('aria-pressed', 'true');
-  $('show-messages').setAttribute('aria-pressed', 'false');
-});
-$('show-messages').addEventListener('click', () => {
-  if ($('lab').hidden) return;
-  views.forEach((id, index) => { $(id).hidden = priorVisibility[index]; });
-  $('lab').hidden = true;
-  $('show-lab').setAttribute('aria-pressed', 'false');
-  $('show-messages').setAttribute('aria-pressed', 'true');
-});
+const navigation = [...document.querySelectorAll('[data-view]')];
+function openView(view) {
+  for (const button of navigation) {
+    const active = button.dataset.view === view;
+    if (active) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+    $(button.getAttribute('aria-controls')).hidden = !active;
+  }
+  $('workspace').focus();
+}
+for (const button of navigation) button.addEventListener('click', () => openView(button.dataset.view));
+for (const button of document.querySelectorAll('[data-open-view]')) {
+  button.addEventListener('click', () => openView(button.dataset.openView));
+}
 
 async function pair() {
   const oqs = await getOqs();
@@ -27,7 +25,7 @@ async function pair() {
   const inviteKey = await derive(secret, 'invite authentication');
   secret.fill(0);
   const make = role => new Peer({
-    oqs, role, room, inviteKey, algorithm: 'ML-KEM-768',
+    oqs, role, room, inviteKey, policy: defaultPolicy,
     identity: oqs.identity(), roomState: { offers: new Set(), seen: new Map() },
   });
   return [make('alice'), make('bob')];
@@ -52,8 +50,8 @@ $('run-attack').addEventListener('click', async () => {
     let attempt, expected;
     if (scenario === 'negotiation') {
       const offer = await alice.offer();
-      attempt = () => bob.receive({ ...offer, algorithm: 'HQC-3' });
-      expected = /different KEM/;
+      attempt = () => bob.receive({ ...offer, policy: { ...offer.policy, experimental: true } });
+      expected = /Invitation authentication/;
     } else {
       await handshake(alice, bob);
       const { packet } = await alice.seal({ id: encode(random(16)), text: 'Isolated lab message' });
